@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Repo root has no setup.py/package install, so pytest needs to be told where
+# `app` lives; without this, `from app import ...` only works if PYTHONPATH is
+# set by hand (which is how it silently worked in every local run so far).
+pythonpath = ["."]
