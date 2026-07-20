@@ -1,0 +1,15 @@
+.env
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+venv/
+.claude
+postgres_cheatsheet.md
+
+# Dev-only synthetic seeder (test data + throwaway tooling; keep out of the repo
+# and out of prod). Un-ignore if you decide to keep it as an integration test.
+dev/
+
+# Personal notes and study docs (TODO, design defenses, learning plans).
+notes/

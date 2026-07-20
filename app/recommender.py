@@ -1,0 +1,89 @@
+"""Artist recommender math: pure functions over sparse dicts {tag: value}, no
+numpy, no DB (reads/caching live in sync_service + queries/recommend.py).
+
+The idea: each artist is a vector over genre tags, a user's taste is the sum
+of their played artists' vectors, and unplayed artists are ranked by cosine
+similarity (direction of taste, not volume). TF-IDF discounts tags that are on
+every artist so distinctive matches ("shoegaze") outweigh generic ones ("rock").
+"""
+
+import math
+from collections import defaultdict
+
+
+def compute_idf(corpus: dict[str, dict[str, float]]) -> dict[str, float]:
+    """idf per tag = log(total_artists / artists_carrying_the_tag). Common tag,
+    low idf; rare tag, high; a tag on every artist gets 0 and drops out.
+    `corpus` maps artist -> {tag: weight}."""
+    n_artists = len(corpus)
+    doc_freq: dict[str, int] = defaultdict(int)
+    for tags in corpus.values():
+        for tag in tags:
+            doc_freq[tag] += 1
+    return {tag: math.log(n_artists / freq) for tag, freq in doc_freq.items()}
+
+
+def build_artist_vectors(
+    corpus: dict[str, dict[str, float]], idf: dict[str, float]
+) -> dict[str, dict[str, float]]:
+    """Each artist's raw tag weights -> a TF-IDF vector {tag: tf * idf}, where
+    TF = weight / the artist's total weight (so artists with many tags are on
+    the same scale as artists with few)."""
+    vectors: dict[str, dict[str, float]] = {}
+    for artist, tags in corpus.items():
+        total = sum(tags.values())
+        if total == 0:
+            continue  # weightless/sentinel-only artist -- nothing to compare
+        vectors[artist] = {
+            tag: (weight / total) * idf[tag] for tag, weight in tags.items()
+        }
+    return vectors
+
+
+def build_user_vector(
+    plays: dict[str, int], artist_vectors: dict[str, dict[str, float]]
+) -> dict[str, float]:
+    """Sum a user's played artists into one taste vector, each scaled by
+    log(1 + plays) so a few obsessions don't drown out the rest. Artists we
+    have no vector for are skipped."""
+    taste: dict[str, float] = defaultdict(float)
+    for artist, count in plays.items():
+        vec = artist_vectors.get(artist)
+        if not vec:
+            continue
+        weight = math.log(1 + count)
+        for tag, value in vec.items():
+            taste[tag] += weight * value
+    return dict(taste)
+
+
+def cosine(a: dict[str, float], b: dict[str, float]) -> float:
+    """Cosine similarity of two sparse vectors: dot / (|a| * |b|). Returns 0
+    if either vector is empty or zero-length."""
+    if not a or not b:
+        return 0.0
+    dot = sum(a[tag] * b[tag] for tag in a.keys() & b.keys())
+    norm_a = math.sqrt(sum(v * v for v in a.values()))
+    norm_b = math.sqrt(sum(v * v for v in b.values()))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def recommend(
+    user_vector: dict[str, float],
+    artist_vectors: dict[str, dict[str, float]],
+    already_played: set[str],
+    k: int = 20,
+) -> list[tuple[str, float]]:
+    """Top k unplayed artists as (artist, cosine score), best first. Zero
+    scores (no tag overlap) are dropped rather than used as filler."""
+    scored = []
+    for artist, vec in artist_vectors.items():
+        if artist in already_played:
+            continue
+        score = cosine(user_vector, vec)
+        if score > 0:
+            scored.append((artist, score))
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored[:k]

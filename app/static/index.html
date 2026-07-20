@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotation</title>
+<script>
+  // set theme before paint to avoid a flash; default to the bright (light) theme
+  (function () { try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'light'); } catch (e) {} })();
+</script>
+<style>
+  :root {
+    --bg: #f7f1e5; --bg-2: #fffdf8; --raise: #fffdf8;
+    --ink: #211d17; --ink-2: #5c5648; --muted: #948d7c;
+    --line: rgba(33,29,23,.13); --chip: rgba(33,29,23,.05);
+    --accent: #f4512c; --accent-2: #0e9c8e; --on-accent: #fff;
+    --display: "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #17130d; --bg-2: #201b13; --raise: #241f16;
+    --ink: #f2ecdd; --ink-2: #bcb3a0; --muted: #8a8069;
+    --line: rgba(242,236,221,.13); --chip: rgba(242,236,221,.06);
+    --accent: #ff6a45; --accent-2: #35c9b6; --on-accent: #1a0e07;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans);
+         padding: 0 22px 60px; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1080px; margin: 0 auto; }
+  a { color: inherit; }
+
+  /* masthead */
+  header.mast { padding: 24px 0 0; }
+  .mast-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .logo { font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -.4px; }
+  .mast-r { display: flex; align-items: center; gap: 10px; }
+  form.search { display: flex; gap: 8px; align-items: center; }
+  input { padding: 9px 13px; border: 1px solid var(--line); border-radius: 8px;
+          background: var(--bg-2); color: var(--ink); font: inherit; min-width: 168px; }
+  input::placeholder { color: var(--muted); }
+  input:focus { outline: none; border-color: var(--accent); }
+  button { padding: 9px 15px; border: 0; border-radius: 8px; font: inherit; font-weight: 600;
+           color: var(--on-accent); background: var(--accent); cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  .iconbtn { background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-2);
+             padding: 8px 11px; font-size: 15px; line-height: 1; }
+  .iconbtn:hover { color: var(--ink); border-color: var(--accent); }
+  #status { color: var(--muted); font-size: 13px; }
+  .viewing { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .viewing a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
+  .rule { height: 1px; background: var(--line); margin: 16px 0 0; }
+
+  /* landing */
+  #landing { padding: 68px 0 40px; max-width: 640px; }
+  #landing h2 { font-family: var(--display); font-weight: 500; font-size: clamp(30px, 5vw, 46px);
+                line-height: 1.1; letter-spacing: -.5px; }
+  #landing h2 span { color: var(--accent); }
+  #landing p { color: var(--ink-2); margin-top: 18px; font-size: 16px; }
+  #landing .hint { color: var(--muted); font-size: 14px; margin-top: 26px; }
+
+  /* tabs */
+  nav.tabs { display: flex; gap: 24px; overflow-x: auto; border-bottom: 1px solid var(--line); margin: 20px 0 28px; }
+  nav.tabs button { background: none; color: var(--muted); border: 0; border-radius: 0; padding: 12px 1px;
+                    font-weight: 600; font-size: 14px; white-space: nowrap;
+                    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  nav.tabs button:hover { color: var(--ink); }
+  nav.tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+  .panel { display: grid; gap: 32px; }
+  .panel[hidden] { display: none; }
+  section.block > .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; }
+  .head h3 { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: -.2px; }
+  .head .cap { color: var(--muted); font-size: 13px; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 12px; }
+  .subh { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 10px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 26px; }
+  .stat .n { font-family: var(--display); font-size: 42px; font-weight: 600; line-height: 1; }
+  .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-top: 7px; }
+
+  /* bar chart */
+  .chart { display: flex; align-items: flex-end; gap: 7px; height: 200px; padding-top: 22px; }
+  .chart .col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; cursor: pointer; }
+  .chart .bar { width: 62%; max-width: 42px; background: var(--accent); border-radius: 3px 3px 0 0;
+                min-height: 3px; position: relative; opacity: .88; transition: opacity .12s; }
+  .chart .col:hover .bar { opacity: 1; }
+  .chart .bar .v { position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+                   font-size: 11px; color: var(--ink-2); white-space: nowrap; }
+  #hbars .bar { background: var(--accent-2); }
+  .xlabels { display: flex; gap: 7px; margin-top: 9px; }
+  .xlabels span { flex: 1; text-align: center; font-size: 11px; color: var(--muted); }
+
+  .clock { display: grid; grid-template-columns: 22px repeat(24, 1fr); gap: 3px; font-size: 10px; color: var(--muted); }
+  .clock .cell { aspect-ratio: 1; border-radius: 2px; background: var(--chip); }
+
+  /* ranked meters */
+  .ranked { display: grid; gap: 11px; }
+  .ranked .row { display: grid; grid-template-columns: minmax(96px, 176px) 1fr auto; align-items: center; gap: 14px; }
+  .ranked .k { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ranked .meter { height: 8px; background: var(--chip); border-radius: 5px; overflow: hidden; }
+  .ranked .meter > span { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
+  #genres .meter > span { background: var(--accent-2); }
+  .ranked .v { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+
+  .artist, .genre { background: none; border: 0; padding: 0; color: inherit; font: inherit;
+                    cursor: pointer; text-align: left; border-bottom: 1px solid transparent; }
+  .artist:hover, .genre:hover { border-bottom-color: var(--accent); color: var(--accent); }
+  .tlink, .alink { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
+  .tlink:hover, .alink:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  /* For you */
+  .reclist { display: grid; gap: 2px; }
+  .rec { display: grid; grid-template-columns: 30px 1fr; gap: 16px; padding: 15px 0;
+         border-top: 1px solid var(--line); align-items: start; }
+  .rec:first-child { border-top: 0; }
+  .rec .rk { font-family: var(--display); font-size: 20px; color: var(--muted); line-height: 1.3; }
+  .rec .name { font-size: 18px; font-weight: 600; }
+  .rec .match { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; }
+  .rec .match .meter { flex: 0 0 120px; height: 6px; background: var(--chip); border-radius: 4px; overflow: hidden; }
+  .rec .match .meter > span { display: block; height: 100%; background: var(--accent); }
+  .rec .match .pct { font-size: 12px; color: var(--muted); }
+  .rec .gw { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
+  .rec .gw b { color: var(--muted); font-weight: 500; }
+  .tracklist { display: grid; gap: 0; }
+  .tracklist .t { padding: 11px 0; border-top: 1px solid var(--line); font-size: 16px; }
+  .tracklist .t:first-child { border-top: 0; }
+  .tracklist .t .by { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
+  @media (max-width: 720px) { .cols2 { grid-template-columns: 1fr; } }
+
+  /* tables (fixed layout so sorting can't reflow widths) */
+  .scroll { overflow-x: auto; }
+  table.tbl { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+  table.tbl th, table.tbl td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line);
+                               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.tbl th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  table.tbl th.sortable { cursor: pointer; }
+  table.tbl th.sortable:hover { color: var(--ink); }
+  table.tbl tbody tr:hover { background: var(--chip); }
+  .filterbar { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  .filterbar button { background: none; color: var(--accent); border: 0; padding: 0 0 0 8px; font-weight: 600; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 16px; font-size: 13px; }
+  .pager button { background: var(--bg-2); color: var(--ink); border: 1px solid var(--line); }
+
+  .sub { color: var(--muted); }
+  .crow { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .crow:last-child { border-bottom: 0; }
+  .crow .v { color: var(--muted); white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: 12px; color: var(--ink-2); }
+  .bignum { font-family: var(--display); font-size: 54px; font-weight: 600; line-height: 1; color: var(--accent); }
+
+  footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted);
+           font-size: 13px; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  footer a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
+
+  /* modal */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center;
+           justify-content: center; padding: 22px; z-index: 20; }
+  .modal[hidden] { display: none; }
+  .modal-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; max-width: 480px;
+                width: 100%; max-height: 84vh; overflow: auto; padding: 24px; position: relative; }
+  .modal-x { position: absolute; top: 12px; right: 12px; background: none; color: var(--muted); font-size: 22px; padding: 0 6px; }
+  .modal h3 { font-family: var(--display); font-size: 26px; font-weight: 600; padding-right: 30px; }
+  .modal .plays { color: var(--muted); font-size: 13.5px; margin-top: 4px; }
+  .modal h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 20px 0 10px; }
+  .modal ol { padding-left: 22px; display: grid; gap: 8px; font-size: 15px; }
+  .modal .lfm { display: inline-block; margin-top: 20px; color: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="mast">
+    <div class="mast-top">
+      <div class="logo">Rotation</div>
+      <div class="mast-r">
+        <form class="search" id="form">
+          <input id="user" placeholder="Last.fm username" required>
+          <button>Load</button>
+          <span id="status"></span>
+        </form>
+        <button type="button" class="iconbtn" id="theme-toggle" aria-label="toggle light or dark">☾</button>
+      </div>
+    </div>
+    <div class="viewing" id="viewing" hidden></div>
+    <div class="rule"></div>
+  </header>
+
+  <section id="landing">
+    <h2>A record of how <span>someone listens</span>.</h2>
+    <p>Streaks, genres, loyal favourites and taste, drawn from a listener's scrobble history.</p>
+    <p class="hint">Enter a Last.fm username above to begin.</p>
+  </section>
+
+  <div id="app" hidden>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="trends">Trends</button>
+      <button data-tab="taste">Taste</button>
+      <button data-tab="foryou">For you</button>
+      <button data-tab="compare">Compare</button>
+      <button data-tab="scrobbles">Scrobbles</button>
+    </nav>
+
+    <section class="panel" data-panel="overview">
+      <div class="stats">
+        <div class="stat"><div class="n" id="t-plays"></div><div class="l">plays</div></div>
+        <div class="stat"><div class="n" id="t-hours"></div><div class="l">hours</div></div>
+        <div class="stat"><div class="n" id="t-streak"></div><div class="l">longest streak</div></div>
+        <div class="stat"><div class="n" id="t-artists"></div><div class="l">artists</div></div>
+      </div>
+      <section class="block">
+        <div class="head"><h3>Plays</h3><span class="cap">by week, last 12</span></div>
+        <div class="chart" id="bars"></div>
+        <div class="xlabels" id="bar-labels"></div>
+        <div class="note">Click a bar to see that week's scrobbles.</div>
+      </section>
+      <section class="block">
+        <div class="head"><h3>Listening clock</h3><span class="cap">by weekday &amp; hour, UTC</span></div>
+        <div class="clock" id="clock"></div>
+      </section>
+    </section>
+
+    <section class="panel" data-panel="trends" hidden>
+      <section class="block">
+        <div class="head"><h3>Listening hours</h3><span class="cap">by week, last 12</span></div>
+        <div class="chart" id="hbars"></div>
+        <div class="xlabels" id="hbar-labels"></div>
+        <div class="note">Click a bar for that week. A slight undercount — Last.fm has no stored length for some tracks, which count as zero.</div>
+      </section>
+      <section class="block">
+        <div class="head"><h3>Month by month</h3></div>
+        <div class="scroll"><table class="tbl" id="highlights"></table></div>
+      </section>
+      <section class="block">
+        <div class="head"><h3>On repeat</h3><span class="cap">played hard inside a three-day stretch</span></div>
+        <div class="cols2">
+          <div><div class="subh">Tracks</div><ul class="tracklist" id="song-binges"></ul></div>
+          <div><div class="subh">Albums</div><ul class="tracklist" id="binges"></ul></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel" data-panel="taste" hidden>
+      <section class="block">
+        <div class="head"><h3>Genres</h3><span class="cap">click one to see its tracks</span></div>
+        <div class="ranked" id="genres"></div>
+      </section>
+      <section class="block">
+        <div class="head"><h3>Loyalty</h3><span class="cap">artists with 5+ plays</span></div>
+        <div class="ranked" id="loyalty"></div>
+        <div class="note">Full bar = played across many different days (a steady favourite). Short bar = many plays packed into a few days (a passing binge). Only artists with at least five plays appear.</div>
+      </section>
+    </section>
+
+    <section class="panel" data-panel="foryou" hidden>
+      <div class="cols2">
+        <section class="block">
+          <div class="head"><h3>Artists to explore</h3></div>
+          <div class="reclist" id="recs"></div>
+        </section>
+        <section class="block">
+          <div class="head"><h3>Deep cuts</h3><span class="cap">by favourite artists, not yet played</span></div>
+          <div class="tracklist" id="deepcuts"></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="compare" hidden>
+      <section class="block">
+        <div class="head"><h3>Compare taste</h3></div>
+        <form class="search" id="compat-form">
+          <input id="other" placeholder="another Last.fm username">
+          <button>Compare</button>
+        </form>
+        <div class="note">Enter any Last.fm username — if they're new, they'll be pulled in first (that can take a moment).</div>
+        <div id="compat" style="margin-top:20px"></div>
+      </section>
+    </section>
+
+    <section class="panel" data-panel="scrobbles" hidden>
+      <section class="block">
+        <div class="head"><h3>Scrobbles</h3></div>
+        <form class="search" id="scrob-form">
+          <input id="scrob-search" placeholder="search artist or track">
+          <button>Search</button>
+        </form>
+        <div class="filterbar" id="scrob-filter" hidden></div>
+        <div class="scroll" style="margin-top:14px"><table class="tbl" id="scrobbles"></table></div>
+        <div class="pager">
+          <button id="prev" type="button">Prev</button>
+          <button id="next" type="button">Next</button>
+          <span class="sub" id="scrob-range"></span>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <footer>
+    <span>Powered by <a href="https://www.last.fm" target="_blank" rel="noopener">AudioScrobbler</a> · data from Last.fm, updated daily</span>
+    <span id="foot-user"></span>
+  </footer>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card"><button class="modal-x" id="modal-close" aria-label="close">×</button><div id="modal-body"></div></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const API = (location.protocol.startsWith('http') && ['', '80', '443', '8000'].includes(location.port))
+  ? '' : 'http://localhost:8000';
+const get = (user, path, qs) => fetch(
+  `${API}/analytics/${encodeURIComponent(user)}/${path}${qs ? '?' + qs : ''}`
+).then(r => { if (!r.ok) throw new Error(`${path}: ${r.status}`); return r.json(); });
+
+const enc = encodeURIComponent;
+const lfmUser = u => `https://www.last.fm/user/${enc(u)}`;
+const lfmArtist = a => `https://www.last.fm/music/${enc(a)}`;
+const lfmAlbum = (a, al) => `https://www.last.fm/music/${enc(a)}/${enc(al)}`;
+const lfmTrack = (a, t) => `https://www.last.fm/music/${enc(a)}/_/${enc(t)}`;
+const artistBtn = n => `<button class="artist" data-name="${esc(n)}">${esc(n)}</button>`;
+const genreBtn = t => `<button class="genre" data-genre="${esc(t)}">${esc(t)}</button>`;
+const trackLink = (a, t) => `<a class="tlink" href="${lfmTrack(a, t)}" target="_blank" rel="noopener">${esc(t)}</a>`;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtWeek = s => { const [y, m, d] = String(s).split('-'); return `${MONTHS[+m - 1]} ${+d}`; };
+const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt = new Date(y, m - 1, d + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`; };
+const emptyMsg = t => `<div class="sub">${t}</div>`;
+
+// theme
+function applyTheme(t) { document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('theme', t); } catch (e) {} $('theme-toggle').textContent = t === 'dark' ? '☀' : '☾'; }
+$('theme-toggle').addEventListener('click', () =>
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
+
+let currentUser = null;
+const hist = { offset: 0, search: '', sort: 'listened_at', dir: 'desc', pageSize: 50, start: null, end: null };
+
+function switchTab(name) {
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.hidden = p.dataset.panel !== name);
+}
+$('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) switchTab(b.dataset.tab); });
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const user = $('user').value.trim();
+  if (!user) return;
+  $('status').textContent = 'loading…';
+  try {
+    const sync = await fetch(`${API}/sync/${enc(user)}`, {method: 'POST'}).then(r => r.json());
+    const names = ['report','streaks','discovery','clock','hours','tag-shift',
+                   'loyalty','highlights','binges','song-binges','recommendations'];
+    const qsFor = n => (n === 'report' || n === 'hours') ? 'period=week' : '';
+    const settled = await Promise.allSettled(names.map(n => get(user, n, qsFor(n))));
+    if (settled.every(r => r.status === 'rejected')) throw new Error(settled[0].reason.message);
+    const d = {};
+    names.forEach((n, i) => d[n] = settled[i].status === 'fulfilled' ? settled[i].value : null);
+
+    currentUser = user;
+    render(d);
+    Object.assign(hist, { offset: 0, search: '', sort: 'listened_at', dir: 'desc', start: null, end: null });
+    $('scrob-search').value = ''; updateScrobFilter(); loadScrobbles();
+    $('compat').innerHTML = ''; $('other').value = '';
+    $('landing').hidden = true; $('app').hidden = false; switchTab('overview');
+    $('viewing').hidden = false;
+    $('viewing').innerHTML = `viewing <a href="${lfmUser(user)}" target="_blank" rel="noopener">${esc(user)} ↗</a> on Last.fm`;
+    $('foot-user').innerHTML = `<a href="${lfmUser(user)}" target="_blank" rel="noopener">${esc(user)}'s Last.fm</a>`;
+
+    const failed = settled.filter(r => r.status === 'rejected').length;
+    $('status').textContent = failed ? `${failed} section(s) unavailable, try again shortly`
+      : sync.status === 'syncing' ? 'first sync running — numbers may still grow' : '';
+  } catch (err) { $('status').textContent = 'could not load: ' + err.message; }
+});
+
+function render(d) {
+  const report = d.report || [], streaks = d.streaks || [], discovery = d.discovery || [];
+  const clock = d.clock || [], hours = d.hours || [], loyalty = d.loyalty || [];
+  const highlights = d.highlights || [], binges = d.binges || [], songBinges = d['song-binges'] || [];
+  const tagShift = d['tag-shift'] || [];
+  const recs = d.recommendations || {artists: [], songs_from_favorites: [], songs_from_new_artists: []};
+
+  $('t-plays').textContent = report.reduce((s, m) => s + m.plays, 0).toLocaleString();
+  $('t-hours').textContent = Math.round(hours.reduce((s, m) => s + Number(m.hours || 0), 0)).toLocaleString();
+  $('t-streak').textContent = streaks.length ? Math.max(...streaks.map(s => s.length_days)) : 0;
+  $('t-artists').textContent = discovery.reduce((s, m) => s + m.new_artists, 0).toLocaleString();
+
+  barChart('bars', 'bar-labels', report.slice(-12), m => m.plays);
+  barChart('hbars', 'hbar-labels', hours.slice(-12), m => Number(m.hours || 0));
+  drawClock(clock);
+
+  const gt = {};
+  tagShift.forEach(r => gt[r.tag] = (gt[r.tag] || 0) + r.plays);
+  const genres = Object.entries(gt).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const gMax = genres.length ? genres[0][1] : 1;
+  $('genres').innerHTML = genres.map(([tag, plays]) => rankRow(genreBtn(tag), plays / gMax, plays + ' plays'))
+    .join('') || emptyMsg('no genre data yet');
+
+  $('loyalty').innerHTML = loyalty.slice(0, 12).map(a =>
+    rankRow(artistBtn(a.artist_name), Number(a.loyalty), `${a.plays} plays · ${a.active_days}/${a.span_days} days`))
+    .join('') || emptyMsg('need a few more plays per artist');
+
+  const hi = highlights.slice(-12).reverse();
+  $('highlights').innerHTML = hi.length ? `
+    <thead><tr><th style="width:16%">Month</th><th style="width:32%">Most played</th>
+      <th style="width:32%">Top new find</th><th style="width:20%">Returning</th></tr></thead>
+    <tbody>${hi.map(r => `<tr>
+      <td>${esc(String(r.month).slice(0, 7))}</td>
+      <td>${artistBtn(r.most_played_artist)} <span class="sub">${r.most_played_plays}</span></td>
+      <td>${r.top_new_artist ? artistBtn(r.top_new_artist) + ' <span class="sub">' + r.top_new_plays + '</span>' : '<span class="sub">—</span>'}</td>
+      <td>${r.revisited_artists}</td></tr>`).join('')}</tbody>`
+    : '<tbody><tr><td class="sub">no months yet</td></tr></tbody>';
+
+  $('song-binges').innerHTML = songBinges.slice(0, 12).map(b => `<li class="t">
+    ${trackLink(b.artist_name, b.track_name)}
+    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays_in_3_days} plays in 3 days</div></li>`
+  ).join('') || emptyMsg('no track bursts yet');
+  $('binges').innerHTML = binges.slice(0, 12).map(b => `<li class="t">
+    <a class="alink" href="${lfmAlbum(b.artist_name, b.album_name)}" target="_blank" rel="noopener">${esc(b.album_name)}</a>
+    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays_in_3_days} plays in 3 days</div></li>`
+  ).join('') || emptyMsg('no album bursts yet');
+
+  const gw = {};
+  recs.songs_from_new_artists.forEach(s => (gw[s.artist_name] = gw[s.artist_name] || []).push(s.track_name));
+  const top = recs.artists[0] ? recs.artists[0].score : 1;
+  $('recs').innerHTML = recs.artists.map((a, i) => {
+    const pct = Math.round(100 * a.score / (top || 1));
+    const tracks = (gw[a.artist_name] || []).slice(0, 3);
+    const gwHtml = tracks.length
+      ? `<div class="gw"><b>Start with</b> ${tracks.map(t => trackLink(a.artist_name, t)).join(' · ')}</div>` : '';
+    return `<div class="rec"><div class="rk">${String(i + 1).padStart(2, '0')}</div><div>
+      <div class="name">${artistBtn(a.artist_name)}</div>
+      <div class="match"><span class="meter"><span style="width:${pct}%"></span></span><span class="pct">${pct}% match</span></div>
+      ${gwHtml}</div></div>`;
+  }).join('') || emptyMsg('recommendations are computed nightly — check back tomorrow');
+
+  $('deepcuts').innerHTML = recs.songs_from_favorites.map(s => `<div class="t">
+    ${trackLink(s.artist_name, s.track_name)}<div class="by">${artistBtn(s.artist_name)}</div></div>`
+  ).join('') || emptyMsg('nothing yet');
+}
+
+function rankRow(kHtml, frac, valText) {
+  const w = Math.max(2, Math.round(100 * frac));
+  return `<div class="row"><span class="k">${kHtml}</span>
+    <span class="meter"><span style="width:${w}%"></span></span><span class="v">${esc(valText)}</span></div>`;
+}
+
+function barChart(barsId, labelsId, rows, valOf) {
+  const max = Math.max(...rows.map(valOf), 1);
+  $(barsId).innerHTML = rows.map(r => {
+    const v = valOf(r), h = Math.round(100 * v / max);
+    const label = Number.isInteger(v) ? v.toLocaleString() : v;
+    return `<div class="col" data-week="${esc(r.month)}" title="${esc(fmtWeek(r.month))}: ${label}"><span class="bar" style="height:${h}%"><span class="v">${label}</span></span></div>`;
+  }).join('');
+  $(labelsId).innerHTML = rows.map(r => `<span>${esc(fmtWeek(r.month))}</span>`).join('');
+}
+
+function drawClock(rows) {
+  const byCell = {}; let cmax = 1;
+  rows.forEach(r => { byCell[r.weekday + '-' + r.hour] = r.plays; cmax = Math.max(cmax, r.plays); });
+  const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  let html = '<span></span>' + [...Array(24).keys()].map(h => `<span>${h % 6 ? '' : h}</span>`).join('');
+  days.forEach((d, w) => {
+    html += `<span>${d}</span>` + [...Array(24).keys()].map(h => {
+      const n = byCell[w + '-' + h] || 0;
+      const bg = n ? `style="background:var(--accent);opacity:${(0.18 + 0.82 * n / cmax).toFixed(2)}"` : '';
+      return `<div class="cell" ${bg} title="${d} ${h}:00 — ${n} plays"></div>`;
+    }).join('');
+  });
+  $('clock').innerHTML = html;
+}
+
+// clicks: artist -> modal, genre -> modal, bar -> that week's scrobbles
+document.body.addEventListener('click', e => {
+  const art = e.target.closest('.artist');
+  if (art) { e.preventDefault(); return openArtist(art.dataset.name); }
+  const gen = e.target.closest('.genre');
+  if (gen) { e.preventDefault(); return openGenre(gen.dataset.genre); }
+  const col = e.target.closest('.chart .col[data-week]');
+  if (col) return gotoWeek(col.dataset.week);
+});
+
+// modal
+$('modal-close').addEventListener('click', closeModal);
+$('modal').addEventListener('click', e => { if (e.target === $('modal')) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+function closeModal() { $('modal').hidden = true; }
+
+async function openArtist(name) {
+  if (!currentUser) return;
+  $('modal-body').innerHTML = `<h3>${esc(name)}</h3><p class="plays">loading…</p>`;
+  $('modal').hidden = false;
+  let a;
+  try { a = await get(currentUser, 'artist', `name=${enc(name)}`); }
+  catch { a = {name, plays: 0, tags: [], top_tracks: []}; }
+  const chips = a.tags.length ? `<div class="chips">${a.tags.map(t => `<span class="chip">${esc(t.tag)}</span>`).join('')}</div>` : '';
+  const tracks = a.top_tracks.length
+    ? `<h4>Popular tracks</h4><ol>${a.top_tracks.map(t => `<li>${trackLink(a.name, t)}</li>`).join('')}</ol>` : '';
+  const played = a.plays ? `${a.plays.toLocaleString()} plays in this library` : 'not in this library yet';
+  $('modal-body').innerHTML = `<h3>${esc(a.name)}</h3><p class="plays">${played}</p>${chips}${tracks}
+    <a class="lfm" href="${lfmArtist(a.name)}" target="_blank" rel="noopener">Open on Last.fm ↗</a>`;
+}
+
+async function openGenre(tag) {
+  if (!currentUser) return;
+  $('modal-body').innerHTML = `<h3>${esc(tag)}</h3><p class="plays">loading…</p>`;
+  $('modal').hidden = false;
+  let rows;
+  try { rows = await get(currentUser, 'genre', `tag=${enc(tag)}`); }
+  catch { rows = []; }
+  const list = rows.length
+    ? `<h4>Most played in this genre</h4><ol>${rows.slice(0, 40).map(r =>
+        `<li>${trackLink(r.artist_name, r.track_name)} <span class="sub">${esc(r.artist_name)} · ${r.plays}</span></li>`).join('')}</ol>`
+    : '<p class="plays">no tracks in this genre yet</p>';
+  $('modal-body').innerHTML = `<h3>${esc(tag)}</h3><p class="plays">a genre in this library</p>${list}`;
+}
+
+function gotoWeek(week) {
+  Object.assign(hist, { start: week, end: addDays(week, 7), search: '', offset: 0 });
+  $('scrob-search').value = '';
+  switchTab('scrobbles'); updateScrobFilter(); loadScrobbles();
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function updateScrobFilter() {
+  const f = $('scrob-filter');
+  let label = '';
+  if (hist.start) label = `Week of ${fmtWeek(hist.start)}`;
+  else if (hist.search) label = `Matching “${hist.search}”`;
+  if (label) { f.hidden = false; f.innerHTML = `${label} <button type="button" id="clear-filter">clear</button>`; }
+  else { f.hidden = true; f.innerHTML = ''; }
+}
+$('scrob-filter').addEventListener('click', e => {
+  if (e.target.id === 'clear-filter') {
+    Object.assign(hist, { start: null, end: null, search: '', offset: 0 });
+    $('scrob-search').value = ''; updateScrobFilter(); loadScrobbles();
+  }
+});
+
+// scrobble history
+const HIST_COLS = [['listened_at', 'When', '26%'], ['track_name', 'Track', '30%'],
+                   ['artist_name', 'Artist', '26%'], ['album_name', 'Album', '18%']];
+async function loadScrobbles() {
+  if (!currentUser) return;
+  let qs = `search=${enc(hist.search)}&limit=${hist.pageSize}&offset=${hist.offset}&sort=${hist.sort}&dir=${hist.dir}`;
+  if (hist.start) qs += `&start=${hist.start}&end=${hist.end}`;
+  let rows;
+  try { rows = await get(currentUser, 'scrobbles', qs); }
+  catch { $('scrobbles').innerHTML = '<tbody><tr><td class="sub">could not load history</td></tr></tbody>'; return; }
+  const head = '<thead><tr>' + HIST_COLS.map(([k, label, w]) => {
+    const arr = hist.sort === k ? (hist.dir === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="sortable" data-key="${k}" style="width:${w}">${label}${arr}</th>`;
+  }).join('') + '</tr></thead>';
+  const body = rows.length ? `<tbody>${rows.map(r => `<tr>
+      <td class="sub">${new Date(r.listened_at).toLocaleString()}</td>
+      <td>${trackLink(r.artist_name, r.track_name)}</td>
+      <td>${artistBtn(r.artist_name)}</td>
+      <td class="sub">${esc(r.album_name)}</td></tr>`).join('')}</tbody>`
+    : '<tbody><tr><td class="sub">no matches</td></tr></tbody>';
+  $('scrobbles').innerHTML = head + body;
+  $('scrob-range').textContent = rows.length ? `${hist.offset + 1}–${hist.offset + rows.length}` : '';
+  $('prev').disabled = hist.offset === 0;
+  $('next').disabled = rows.length < hist.pageSize;
+}
+$('scrobbles').addEventListener('click', e => {
+  const th = e.target.closest('th[data-key]'); if (!th) return;
+  const k = th.dataset.key;
+  if (hist.sort === k) hist.dir = hist.dir === 'asc' ? 'desc' : 'asc';
+  else { hist.sort = k; hist.dir = (k === 'listened_at') ? 'desc' : 'asc'; }
+  hist.offset = 0; loadScrobbles();
+});
+$('scrob-form').addEventListener('submit', e => {
+  e.preventDefault();
+  Object.assign(hist, { search: $('scrob-search').value.trim(), start: null, end: null, offset: 0 });
+  updateScrobFilter(); loadScrobbles();
+});
+$('prev').addEventListener('click', () => { hist.offset = Math.max(0, hist.offset - hist.pageSize); loadScrobbles(); });
+$('next').addEventListener('click', () => { hist.offset += hist.pageSize; loadScrobbles(); });
+
+// compatibility
+$('compat-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const other = $('other').value.trim();
+  if (!other || !currentUser) return;
+  $('compat').innerHTML = '<span class="sub">comparing…</span>';
+  let c;
+  try { c = await get(currentUser, `compatibility/${enc(other)}`); }
+  catch (err) { $('compat').innerHTML = `<span class="sub">could not compare: ${esc(err.message)}</span>`; return; }
+  const crow = (k, v) => `<div class="crow"><span>${k}</span><span class="v">${esc(v)}</span></div>`;
+  const artists = (c.shared_artists || []).slice(0, 10).map(a => crow(artistBtn(a.artist_name), `${a.a_plays} / ${a.b_plays}`)).join('') || emptyMsg('no shared artists');
+  const shared = (c.shared_tags || []).slice(0, 8).map(t => crow(genreBtn(t.tag), `${t.a_pct}% / ${t.b_pct}%`)).join('') || emptyMsg('none');
+  const diverge = (c.divergent_tags || []).slice(0, 8).map(t => crow(genreBtn(t.tag), `${t.a_pct}% / ${t.b_pct}%`)).join('') || emptyMsg('none');
+  $('compat').innerHTML = `<div class="bignum">${c.score}%</div>
+    <div class="sub" style="margin:8px 0 24px">taste match · counts and genre shares shown as you / ${esc(other)}</div>
+    <div class="cols2">
+      <section class="block"><div class="head"><h3 style="font-size:17px">Shared artists</h3></div>${artists}</section>
+      <section class="block"><div class="head"><h3 style="font-size:17px">Shared genres</h3></div>${shared}</section>
+    </div>
+    <section class="block" style="margin-top:22px"><div class="head"><h3 style="font-size:17px">Where you differ</h3></div>${diverge}</section>`;
+});
+</script>
+</body>
+</html>

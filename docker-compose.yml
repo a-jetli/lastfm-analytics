@@ -1,0 +1,31 @@
+# Full stack from a clean clone: docker compose up
+# Needs a .env next to this file with LASTFM_API_KEY=<key> (compose reads it).
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: lastfm
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      # Named volume so the data survives container recreation. Postgres 18's
+      # image keeps its data under /var/lib/postgresql.
+      - pgdata:/var/lib/postgresql
+      # The official image runs this against the fresh DB on FIRST boot only.
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # "db" is the service name above; containers on the compose network
+      # reach each other by service name, never "localhost".
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/lastfm
+      LASTFM_API_KEY: ${LASTFM_API_KEY}
+    # "db started", not "db ready" -- fine here because the app only opens
+    # connections per request, never at boot.
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

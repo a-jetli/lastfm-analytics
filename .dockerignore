@@ -1,0 +1,10 @@
+.env
+.git
+.github
+.claude
+notes/
+dev/
+tests/
+__pycache__/
+*.pyc
+.DS_Store
