@@ -1,6 +1,6 @@
 # Rotation
 
-Rotation works by pulling your listening history from Last.fm's API, allowing you to dive deeper into your listening history, trends and binges than most streaming services allow you to view. This requires you to sign up for an account on Last.fm and connect to your streaming services of choice. The application only starts tracking from when you sign up and connect, with the benefit being that there is a single common API to pull all listening data from. 
+Rotation is a music listening history and analytics tool. It works by pulling your listening history from Last.fm's API, allowing you to dive deeper into your listening history, trends and binges than most streaming services allow you to view. This requires you to sign up for an account on Last.fm and connect to your streaming services of choice. The application only starts tracking from when you sign up and connect, with the benefit being that there is a single common API to pull all listening data from. 
 
 It works by pulling your scrobble history into a common PostgreSQL database, allowing it to answer questions about your streaks, discovery rate, listening hours, when you most listen, what genres you listen to, comparing it to someone else, and even some recommendations for what to play next. If you want to run it yourself or modify it, you will need your own Last.fm API key.
 
@@ -11,7 +11,7 @@ same app.
 
 ## Run it
 
-Needs Docker and a Last.fm API key (free, from
+Running Rotation locally needs Docker and a Last.fm API key (free, from
 https://www.last.fm/api/account/create).
 
 ```
@@ -109,9 +109,9 @@ app/
   db.py              Postgres connections
   lastfm.py          every outbound Last.fm call, nothing else touches it
   sync_service.py    when things run: staleness, locks, threads
-  recommender.py     the vector math, no DB, no HTTP
-  routers/           URLs and JSON, no SQL in here
-  queries/           SQL, no HTTP in here
+  recommender.py     the vector math
+  routers/           URLs and JSON
+  queries/           SQL
   static/index.html  the frontend
 schema.sql           tables, indexes, views, curation seed rows
 ```
