@@ -1,8 +1,8 @@
 # Rotation
 
-Pulls your Last.fm listening history into Postgres and answers questions about
-it: streaks, discovery rate, listening hours, when you actually listen, genre
-drift, how your taste compares to someone else's, and what to play next.
+Rotation works by pulling your listening history from Last.fm's API, allowing you to dive deeper into your listening history, trends and binges than most streaming services allow. This requires you to sign up for last.fm and link your streaming services of choice, using a common API. 
+
+It works by pulling your scrobble history into a common PostgreSQL database, allowing it to answer questions about your streaks, discovery rate, listening hours, when you most listen, what genres you listen to, comparing it to someone else, and even some recommendations for what to play next. 
 
 FastAPI + Postgres backend, one static HTML page as the frontend, served by the
 same app.
@@ -96,8 +96,8 @@ not songs. They come from SQL over cached top tracks: popular songs by artists
 you already love but have never played, and entry points into each recommended
 artist.
 
-Genre tags are crowdsourced, so they arrive messy. Tags get stored raw and
-cleaned at read time in one view (`artist_tags_clean`): lowercase, map spelling
+Genre tags are user defined, so they can be misleading, messy and might get spammed.
+Tags get stored raw and cleaned at read time in one view (`artist_tags_clean`): lowercase, map spelling
 variants, drop junk like "seen live". The blocklist and alias tables are
 hand curated, and editing them changes every result with no refetch.
 
