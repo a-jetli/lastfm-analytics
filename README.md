@@ -1,8 +1,8 @@
 # Rotation
 
-Rotation works by pulling your listening history from Last.fm's API, allowing you to dive deeper into your listening history, trends and binges than most streaming services allow. This requires you to sign up for last.fm and link your streaming services of choice, using a common API. 
+Rotation works by pulling your listening history from Last.fm's API, allowing you to dive deeper into your listening history, trends and binges than most streaming services allow you to view. This requires you to sign up for an account on Last.fm and connect to your streaming services of choice. The application only starts tracking from when you sign up and connect, with the benefit being that there is a single common API to pull all listening data from. 
 
-It works by pulling your scrobble history into a common PostgreSQL database, allowing it to answer questions about your streaks, discovery rate, listening hours, when you most listen, what genres you listen to, comparing it to someone else, and even some recommendations for what to play next. 
+It works by pulling your scrobble history into a common PostgreSQL database, allowing it to answer questions about your streaks, discovery rate, listening hours, when you most listen, what genres you listen to, comparing it to someone else, and even some recommendations for what to play next. If you want to run it yourself or modify it, you will need your own Last.fm API key.
 
 FastAPI + Postgres backend, one static HTML page as the frontend, served by the
 same app.
