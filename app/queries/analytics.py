@@ -92,7 +92,7 @@ def get_discovery(cur, user_id: int, tz: str = "UTC"):
     return cur.fetchall()
 
 
-def get_loyalty(cur, user_id: int, tz: str = "UTC"):
+def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
     """Steady favorite vs. binge-then-dropped, as a "do you still come back"
     rate: active_days / days since you first heard them.
 
@@ -105,15 +105,21 @@ def get_loyalty(cur, user_id: int, tz: str = "UTC"):
 
     So: near 1.0 = in rotation ever since you found them; near 0 = you played
     them a lot once and moved on.
+
+    With `days` set, everything is measured INSIDE that window: both the artist's
+    first play and the "your most recent play" anchor come from the filtered
+    plays, so the answer reads as "over the last 30 days, how many of them did I
+    play this artist" rather than an all-time score with a truncated numerator.
     """
     day = _LOCAL_DATE.format(col="listened_at")
+    recent, recent_params = _recent(days)
     # Grouped case-insensitively; mode() picks the most common casing to display.
     cur.execute(
         f"""
         WITH plays AS (
             SELECT artist_name, {day} AS play_day
             FROM scrobbles
-            WHERE user_id = %s
+            WHERE user_id = %s{recent}
         ),
         latest AS (SELECT MAX(play_day) AS day FROM plays)
         SELECT mode() WITHIN GROUP (ORDER BY artist_name) AS artist_name,
@@ -130,7 +136,7 @@ def get_loyalty(cur, user_id: int, tz: str = "UTC"):
         HAVING COUNT(*) >= 5
         ORDER BY loyalty DESC, plays DESC
         """,
-        (tz, user_id),
+        [tz, user_id] + recent_params,
     )
     return cur.fetchall()
 

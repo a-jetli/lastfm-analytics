@@ -340,7 +340,8 @@
         <div class="note">Genres come from Last.fm's community tags, so they reflect how listeners describe an artist, not an official classification.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>Loyalty</h3><span class="cap">artists with 5+ plays</span></div>
+        <div class="head"><h3>Loyalty</h3><span class="cap">artists with 5+ plays</span>
+          <div class="ranges" data-ranges="loyalty"></div></div>
         <div class="ranked" id="loyalty"></div>
         <div class="note">How often you still come back: the share of days since you first heard an artist that you actually played them. Full bar = in rotation ever since. Short bar = played a lot once, then moved on. Only artists with at least five plays appear.</div>
       </section>
@@ -482,14 +483,21 @@ const PANELS = ['report','streaks','discovery','clock','hours','tag-shift',
 const RANGES = [{label: '7d', days: 7}, {label: '30d', days: 30},
                 {label: '6mo', days: 182}, {label: '1y', days: 365},
                 {label: 'All', days: 0}];
-const range = {genres: 0, binges: 7};   // section -> selected days
+// Each section keeps its OWN selection: they answer different questions, so a
+// shared range would make one of them wrong. Genres is a portrait of taste and
+// wants everything; On repeat is "what am I hammering right now" and wants a
+// week; Loyalty is a long-run return rate and wants everything.
+const range = {genres: 0, binges: 7, loyalty: 0};   // section -> selected days
+// section -> the panels its picker refetches. Genres has no endpoint of its
+// own; it is summed client-side from tag-shift.
+const RANGE_PANELS = {genres: ['tag-shift'], binges: ['binges', 'song-binges'],
+                      loyalty: ['loyalty']};
 
 const panelQs = n => {
   let qs = `tz=${enc(TZ)}`;
   if (n === 'report' || n === 'hours') qs += '&period=week';
-  // Genres is summed client-side from tag-shift, so its picker drives that call.
-  if (n === 'tag-shift' && range.genres) qs += `&days=${range.genres}`;
-  if ((n === 'binges' || n === 'song-binges') && range.binges) qs += `&days=${range.binges}`;
+  for (const [section, panels] of Object.entries(RANGE_PANELS))
+    if (panels.includes(n) && range[section]) qs += `&days=${range[section]}`;
   return qs;
 };
 
@@ -512,11 +520,12 @@ document.addEventListener('click', async e => {
   range[section] = Number(btn.dataset.days);
   drawRanges();
   // Refetch only the panels this picker feeds, not the whole dashboard.
-  const names = section === 'genres' ? ['tag-shift'] : ['binges', 'song-binges'];
+  const names = RANGE_PANELS[section];
   const settled = await Promise.allSettled(names.map(n => get(currentUser, n, panelQs(n))));
   const patch = {};
   names.forEach((n, i) => { if (settled[i].status === 'fulfilled') patch[n] = settled[i].value; });
   if (section === 'genres') renderGenres(patch['tag-shift'] || []);
+  else if (section === 'loyalty') renderLoyalty(patch.loyalty || []);
   else renderBinges(patch['song-binges'] || [], patch.binges || []);
 });
 
@@ -529,6 +538,13 @@ function renderGenres(tagShift) {
   const gMax = genres.length ? genres[0][1] : 1;
   $('genres').innerHTML = genres.map(([tag, plays]) => rankRow(genreBtn(tag), plays / gMax, plays + ' plays'))
     .join('') || emptyMsg('no genre data in this range');
+}
+
+function renderLoyalty(loyalty) {
+  $('loyalty').innerHTML = (loyalty || []).slice(0, 12).map(a =>
+    rankRow(artistBtn(a.artist_name), Number(a.loyalty),
+            `${a.plays} plays · active ${a.active_days} of ${a.days_since_first_play} days since you found them`))
+    .join('') || emptyMsg('need a few more plays per artist in this range');
 }
 
 function renderBinges(songBinges, binges) {
@@ -655,10 +671,7 @@ function render(d) {
 
   renderGenres(tagShift);
 
-  $('loyalty').innerHTML = loyalty.slice(0, 12).map(a =>
-    rankRow(artistBtn(a.artist_name), Number(a.loyalty),
-            `${a.plays} plays · active ${a.active_days} of ${a.days_since_first_play} days since you found them`))
-    .join('') || emptyMsg('need a few more plays per artist');
+  renderLoyalty(loyalty);
 
   const fmtMonth = m => { const [y, mo] = String(m).split('-'); return `${MON_ABBR[+mo - 1]} ${y}`; };
   const sm = summary.slice().reverse();  // newest month first

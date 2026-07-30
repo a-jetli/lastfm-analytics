@@ -295,6 +295,24 @@ def test_tag_corpus_gives_one_vector_per_artist(conn, alice):
 # --- the tag exclusion rule ---------------------------------------------------
 
 
+def test_exclusion_view_stays_cheap(conn, cur, alice):
+    """The first version of this rule used a correlated NOT EXISTS that
+    re-scanned the `allowed` CTE once per row: 10ms became 1.3s on a 6k-row
+    corpus, and every genre query reads this view.
+
+    Asserts the suppression is planned as an anti-join, i.e. the excluded set is
+    built once and hashed. Note this deliberately does NOT assert "no SubPlan
+    anywhere": the blocklist NOT IN is a hashed subplan, evaluated once, and has
+    always been there.
+    """
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Arijit Singh", "bollywood", 100)
+        qsync.insert_artist_tag(c, "Arijit Singh", "pop", 90)
+        c.execute("EXPLAIN SELECT count(*) FROM artist_tags_clean")
+        plan = "\n".join(row[0] for row in c.fetchall())
+    assert "Anti Join" in plan, f"suppression is no longer an anti-join:\n{plan}"
+
+
 def test_context_tags_suppress_pop_and_hiphop(conn, cur, alice):
     """"pop" on a Bollywood playback singer is crowd shorthand for "popular",
     not the Western genre, and it swamped the real tag. The blocklist can't
@@ -326,6 +344,7 @@ def test_context_tags_suppress_pop_and_hiphop(conn, cur, alice):
         lambda cur, uid, days: q.get_tag_shift(cur, uid, "month", "UTC", days),
         lambda cur, uid, days: q.get_binges(cur, uid, 1, days),
         lambda cur, uid, days: q.get_song_binges(cur, uid, 1, days),
+        lambda cur, uid, days: q.get_loyalty(cur, uid, "UTC", days),
     ],
 )
 def test_range_picker_narrows_and_never_widens(conn, cur, alice, call):

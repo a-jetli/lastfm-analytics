@@ -76,11 +76,12 @@ def discovery(username: str, tz: str = "UTC"):
 
 
 @router.get("/{username}/loyalty")
-def loyalty(username: str, tz: str = "UTC"):
+def loyalty(username: str, tz: str = "UTC", days: int = 0):
     # Per artist: still in rotation vs. binged once and dropped (see the ratio).
+    # ?days= scopes the whole metric to a window, anchor included (0 = all time).
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return q.get_loyalty(cur, user_id, _tz(tz))
+        return q.get_loyalty(cur, user_id, _tz(tz), _days(days))
 
 
 @router.get("/{username}/clock")

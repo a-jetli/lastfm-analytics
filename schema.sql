@@ -119,17 +119,21 @@ WITH mapped AS (
 ),
 allowed AS (  -- unconditional drops first, so exclusions match canonical tags
     SELECT * FROM mapped WHERE tag NOT IN (SELECT tag FROM tag_blocklist)
+),
+-- Every (artist, tag) the rules kill, built ONCE. Small: only artists carrying
+-- a context tag contribute. Written as a set + anti-join rather than the
+-- obvious correlated NOT EXISTS, which re-scanned the `allowed` CTE per row and
+-- took this view from 10ms to 1.3s on a 6k-row corpus -- and every genre query
+-- reads it.
+suppressed AS (
+    SELECT DISTINCT a.artist_name, x.excluded_tag AS tag
+    FROM allowed a
+    JOIN tag_exclusions x ON x.context_tag = a.tag
 )
 SELECT a.artist_name, a.tag, MAX(a.weight) AS weight
 FROM allowed a
-WHERE NOT EXISTS (
-    -- Drop this row if the SAME artist also carries a context tag that excludes it.
-    SELECT 1
-    FROM tag_exclusions x
-    JOIN allowed ctx
-      ON ctx.artist_name = a.artist_name AND ctx.tag = x.context_tag
-    WHERE x.excluded_tag = a.tag
-)
+LEFT JOIN suppressed s ON s.artist_name = a.artist_name AND s.tag = a.tag
+WHERE s.artist_name IS NULL
 GROUP BY a.artist_name, a.tag;
 
 -- Each artist's globally most-played tracks from artist.getTopTracks, best
