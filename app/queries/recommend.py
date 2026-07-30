@@ -7,8 +7,30 @@ and cache the computed results. The vector math itself is in app/recommender.py
 def get_tag_corpus(cur):
     """Every (artist, tag, weight) from the cleaned tag view -- the raw material
     for artist vectors. Returned flat; the caller folds it into {artist: {tag:
-    weight}}. Reads artist_tags_clean, so blocklist/alias/case rules apply."""
-    cur.execute("SELECT artist_name, tag, weight FROM artist_tags_clean")
+    weight}}. Reads artist_tags_clean, so blocklist/alias/exclusion rules apply.
+
+    Folded on lower(artist_name), because Last.fm scrobbles the same artist under
+    several spellings and each one gets its own tag rows. Left split, an artist
+    ends up with two vectors, so BOTH can win a slot and the same act is
+    recommended twice under different casing (seen live: "Tyler, the Creator"
+    and "Tyler, The Creator" in one list). One canonical spelling per artist,
+    chosen by mode() the way get_loyalty does, and the strongest weight wins per
+    tag.
+    """
+    cur.execute(
+        """
+        WITH canon AS (
+            SELECT lower(artist_name) AS akey,
+                   mode() WITHIN GROUP (ORDER BY artist_name) AS display
+            FROM artist_tags_clean
+            GROUP BY lower(artist_name)
+        )
+        SELECT c.display AS artist_name, t.tag, MAX(t.weight) AS weight
+        FROM artist_tags_clean t
+        JOIN canon c ON c.akey = lower(t.artist_name)
+        GROUP BY c.display, t.tag
+        """
+    )
     return cur.fetchall()
 
 
@@ -30,13 +52,19 @@ def get_user_plays(cur, user_id: int):
     the exclusion set (we never recommend an artist the user already plays -- an
     artist they loved a year ago still counts as 'played' and stays excluded).
     Decay never reaches zero, so the row is always present.
+
+    Grouped case-insensitively, like the tag corpus. Split by casing, a user's
+    22 plays of "Charli xcx" did not exclude the corpus entry "Charli XCX", and
+    the recommender cheerfully suggested an artist they already listen to. The
+    exclusion match in recommender.recommend is case-insensitive too, so the two
+    sides cannot drift apart again.
     """
     cur.execute(
         """
-        SELECT artist_name,
+        SELECT mode() WITHIN GROUP (ORDER BY artist_name) AS artist_name,
                SUM(power(0.5, EXTRACT(EPOCH FROM (now() - listened_at))
                               / (86400.0 * %s))) AS recency_weight
-        FROM scrobbles WHERE user_id = %s GROUP BY artist_name
+        FROM scrobbles WHERE user_id = %s GROUP BY lower(artist_name)
         """,
         (TASTE_HALF_LIFE_DAYS, user_id),
     )

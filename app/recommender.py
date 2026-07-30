@@ -88,10 +88,17 @@ def recommend(
     k: int = 20,
 ) -> list[tuple[str, float]]:
     """Top k unplayed artists as (artist, cosine score), best first. Zero
-    scores (no tag overlap) are dropped rather than used as filler."""
+    scores (no tag overlap) are dropped rather than used as filler.
+
+    The exclusion is case-insensitive. Both sides are canonicalised upstream, but
+    they are canonicalised from different tables (scrobbles vs artist_tags), so
+    matching on the exact string means one disagreement puts an artist the user
+    already plays back into their recommendations. Cheap belt and braces.
+    """
+    played = {name.lower() for name in already_played}
     scored = []
     for artist, vec in artist_vectors.items():
-        if artist in already_played:
+        if artist.lower() in played:
             continue
         score = cosine(user_vector, vec)
         if score > 0:

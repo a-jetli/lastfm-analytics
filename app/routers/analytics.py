@@ -34,6 +34,13 @@ def _prepare(username: str) -> int:
     return user_id
 
 
+def _days(days: int) -> int | None:
+    """Range-picker window in days -> what the query layer wants. 0, absent or
+    negative all mean "all time" (None). Capped at 5 years so a hand-typed
+    ?days=99999999 can't turn into an interval Postgres rejects."""
+    return min(days, 1826) if days and days > 0 else None
+
+
 def _tz(name: str) -> str:
     """Validate an IANA timezone name from the browser, falling back to UTC.
 
@@ -127,21 +134,24 @@ def compatibility(username: str, other: str):
 
 
 @router.get("/{username}/binges")
-def binges(username: str, min_plays: int = 6):
-    # Albums played >= min_plays times inside any 3-day window. min_plays is a
-    # ?query=param (URL: /binges?min_plays=10), defaulting to 6.
+def binges(username: str, min_plays: int = 6, days: int = 0):
+    # Albums played >= min_plays times inside any 7-day window. ?days= limits
+    # which plays are considered at all (0 = all time); the 7-day burst window
+    # is what "binge" means and is fixed.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return q.get_binges(cur, user_id, min_plays)
+        return q.get_binges(cur, user_id, min_plays, _days(days))
 
 
 @router.get("/{username}/tag-shift")
-def tag_shift(username: str, period: str = "month", tz: str = "UTC"):
+def tag_shift(username: str, period: str = "month", tz: str = "UTC", days: int = 0):
     # Tag mix over time (taste movement). ?period=week or month (default month).
     # Rows of {period_start, tag, plays, pct_of_period} -- raw numbers to chart.
+    # ?days= restricts to a trailing window (0 = all time); it also backs the
+    # Genres panel, which sums these rows.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return q.get_tag_shift(cur, user_id, period, _tz(tz))
+        return q.get_tag_shift(cur, user_id, period, _tz(tz), _days(days))
 
 
 @router.get("/{username}/hours")
@@ -212,12 +222,12 @@ def scrobbles(username: str, search: str = "", limit: int = 50, offset: int = 0,
 
 
 @router.get("/{username}/song-binges")
-def song_binges(username: str, min_plays: int = 5):
-    # Individual tracks played heavily inside any 3-day window (song-level twin
-    # of /binges). ?min_plays= defaults to 5.
+def song_binges(username: str, min_plays: int = 5, days: int = 0):
+    # Individual tracks played heavily inside any 7-day window (song-level twin
+    # of /binges). ?min_plays= defaults to 5, ?days= as on /binges.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return q.get_song_binges(cur, user_id, min_plays)
+        return q.get_song_binges(cur, user_id, min_plays, _days(days))
 
 
 @router.get("/{username}/genre")

@@ -222,6 +222,127 @@ def test_unknown_sort_column_falls_back_instead_of_raising(cur, alice):
     assert len(rows) == 5
 
 
+# --- regression guards for the three bugs found in the 2026-07-30 sweep -------
+# All three were invisible from the UI with one account, which is exactly the
+# kind of thing tests are for.
+
+
+def test_comparing_a_user_with_themselves_scores_100(conn, cur, alice):
+    """Was 0% next to a full list of shared artists, because the row-splitting
+    loop put everything in one side and cosine against {} is 0. Typing your own
+    handle into the compare box is the first thing anyone tries."""
+    # Compatibility is a genre-vector comparison, so it needs tagged artists.
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Radiohead", "alternative rock", 100)
+        qsync.insert_artist_tag(c, "boygenius", "indie rock", 100)
+    conn.commit()
+    with_self = q.get_compatibility(cur, alice, alice)
+    assert with_self["score"] == 100.0
+    assert with_self["shared_artist_count"] > 0
+
+
+# The recommender path runs on a plain tuple cursor in production
+# (_refresh_recommendations uses conn.cursor()), so these use one too rather
+# than the dict_row cursor the analytics layer needs.
+
+
+def test_recommendations_exclude_played_artists_across_casing(conn, alice):
+    """The exclusion set came from scrobbles and the candidate list from
+    artist_tags, each keyed on its own raw spelling. A user with 22 plays of
+    "Charli xcx" was recommended "Charli XCX"."""
+    from app import recommender
+    from app.queries import recommend as qrec
+
+    with conn.cursor() as c:
+        # alice plays Radiohead/radiohead, boygenius and Nobody. Tag Radiohead
+        # under a THIRD casing so the corpus and the play list disagree.
+        # Two tags over four artists so idf is non-zero: with a single shared
+        # tag every vector is empty, nothing is recommended, and this test would
+        # pass no matter what the exclusion does.
+        qsync.insert_artist_tag(c, "RADIOHEAD", "shoegaze", 100)
+        qsync.insert_artist_tag(c, "boygenius", "shoegaze", 100)
+        qsync.insert_artist_tag(c, "Nobody", "jazz", 100)
+        qsync.insert_artist_tag(c, "Some Stranger", "jazz", 100)
+        conn.commit()
+
+        corpus: dict[str, dict[str, float]] = {}
+        for artist, tag, weight in qrec.get_tag_corpus(c):
+            corpus.setdefault(artist, {})[tag] = float(weight)
+        plays = dict(qrec.get_user_plays(c, alice))
+
+    vectors = recommender.build_artist_vectors(corpus, recommender.compute_idf(corpus))
+    ranked = recommender.recommend(
+        recommender.build_user_vector(plays, vectors), vectors, set(plays)
+    )
+    assert ranked, "nothing scored; the assertion below would be vacuous"
+    assert "radiohead" not in {a.lower() for a, _ in ranked}
+
+
+def test_tag_corpus_gives_one_vector_per_artist(conn, alice):
+    """Two casings meant two vectors, so the same act could win two slots and
+    appear twice in one recommendation list."""
+    from app.queries import recommend as qrec
+
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Radiohead", "alternative rock", 100)
+        qsync.insert_artist_tag(c, "radiohead", "alternative rock", 90)
+        conn.commit()
+        artists = [artist for artist, _, _ in qrec.get_tag_corpus(c)]
+    assert artists, "corpus came back empty; the test would pass vacuously"
+    assert len(artists) == len({a.lower() for a in artists})
+
+
+# --- the tag exclusion rule ---------------------------------------------------
+
+
+def test_context_tags_suppress_pop_and_hiphop(conn, cur, alice):
+    """"pop" on a Bollywood playback singer is crowd shorthand for "popular",
+    not the Western genre, and it swamped the real tag. The blocklist can't
+    express this because these tags are only wrong in combination."""
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Arijit Singh", "bollywood", 100)
+        qsync.insert_artist_tag(c, "Arijit Singh", "pop", 90)
+        qsync.insert_artist_tag(c, "Arijit Singh", "hip hop", 80)  # aliases to hip-hop
+        qsync.insert_artist_tag(c, "Arijit Singh", "hindi", 70)
+        # A control: no context tag, so pop survives untouched.
+        qsync.insert_artist_tag(c, "Carly Rae Jepsen", "pop", 100)
+    conn.commit()
+
+    cur.execute(
+        "SELECT tag FROM artist_tags_clean WHERE artist_name = 'Arijit Singh'"
+    )
+    tags = {r["tag"] for r in cur.fetchall()}
+    assert tags == {"bollywood", "hindi"}, tags
+    cur.execute("SELECT tag FROM artist_tags_clean WHERE artist_name = 'Carly Rae Jepsen'")
+    assert {r["tag"] for r in cur.fetchall()} == {"pop"}
+
+
+# --- the range picker ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda cur, uid, days: q.get_tag_shift(cur, uid, "month", "UTC", days),
+        lambda cur, uid, days: q.get_binges(cur, uid, 1, days),
+        lambda cur, uid, days: q.get_song_binges(cur, uid, 1, days),
+    ],
+)
+def test_range_picker_narrows_and_never_widens(conn, cur, alice, call):
+    """A wider window can never return fewer rows than a narrower one. Cheap
+    invariant that catches a params list spliced in the wrong order, which is
+    the realistic way these three break."""
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Radiohead", "alternative rock", 100)
+        qsync.insert_artist_tag(c, "boygenius", "indie rock", 100)
+    conn.commit()
+    # Fixture plays span days 0-6 starting 10 days ago, so a 3 day window is
+    # empty, 30 days holds all of them, and all-time must match 30 days.
+    counts = [len(call(cur, alice, d)) for d in (3, 30, None)]
+    assert counts[0] == 0
+    assert counts[1] == counts[2] > 0
+
+
 # --- idempotency -------------------------------------------------------------
 # The sync high-water mark is the moment a sync STARTED, so every sync re-offers
 # rows it already inserted. ON CONFLICT DO NOTHING is the only thing making that

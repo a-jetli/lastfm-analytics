@@ -88,6 +88,13 @@
   section.block > .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; }
   .head h3 { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: -.2px; }
   .head .cap { color: var(--muted); font-size: 13px; }
+  /* Range picker, top right of a section head. margin-left:auto pushes it to the
+     far edge while staying on the title's baseline row. */
+  .ranges { margin-left: auto; display: flex; gap: 4px; }
+  .ranges button { background: none; color: var(--muted); font-size: 12px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; line-height: 1.5; }
+  .ranges button:hover { color: var(--ink); border-color: var(--muted); }
+  .ranges button.active { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
   .note { color: var(--muted); font-size: 12.5px; margin-top: 12px; }
   .subh { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 10px; }
 
@@ -316,7 +323,8 @@
         <div class="note">Genres come from Last.fm's community tags, so they reflect how listeners describe an artist, not an official classification.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>On repeat</h3><span class="cap">played hard inside a seven-day stretch</span></div>
+        <div class="head"><h3>On repeat</h3><span class="cap">played hard inside a seven-day stretch</span>
+          <div class="ranges" data-ranges="binges"></div></div>
         <div class="cols2">
           <div><div class="subh">Tracks</div><ul class="tracklist" id="song-binges"></ul></div>
           <div><div class="subh">Albums</div><ul class="tracklist" id="binges"></ul></div>
@@ -326,7 +334,8 @@
 
     <section class="panel" data-panel="taste" hidden>
       <section class="block">
-        <div class="head"><h3>Genres</h3><span class="cap">click one to see its tracks</span></div>
+        <div class="head"><h3>Genres</h3><span class="cap">click one to see its tracks</span>
+          <div class="ranges" data-ranges="genres"></div></div>
         <div class="ranked" id="genres"></div>
         <div class="note">Genres come from Last.fm's community tags, so they reflect how listeners describe an artist, not an official classification.</div>
       </section>
@@ -465,7 +474,73 @@ const PANELS = ['report','streaks','discovery','clock','hours','tag-shift',
 // week or month needs the listener's zone: on server-time buckets a 9pm play
 // lands on tomorrow, which invents streaks and shifts month boundaries. Panels
 // that don't bucket by date ignore the param.
-const panelQs = n => `tz=${enc(TZ)}` + ((n === 'report' || n === 'hours') ? '&period=week' : '');
+
+// Range picker. Two sections carry one, and the value is a trailing window in
+// days that the backend clamps (0 = all time). Defaults differ on purpose:
+// Genres reads as a portrait of your taste, which wants everything; On repeat
+// reads as "what am I hammering right now", which wants the last week.
+const RANGES = [{label: '7d', days: 7}, {label: '30d', days: 30},
+                {label: '6mo', days: 182}, {label: '1y', days: 365},
+                {label: 'All', days: 0}];
+const range = {genres: 0, binges: 7};   // section -> selected days
+
+const panelQs = n => {
+  let qs = `tz=${enc(TZ)}`;
+  if (n === 'report' || n === 'hours') qs += '&period=week';
+  // Genres is summed client-side from tag-shift, so its picker drives that call.
+  if (n === 'tag-shift' && range.genres) qs += `&days=${range.genres}`;
+  if ((n === 'binges' || n === 'song-binges') && range.binges) qs += `&days=${range.binges}`;
+  return qs;
+};
+
+// Buttons are drawn from RANGES rather than written in the markup, so the two
+// pickers can never drift apart.
+function drawRanges() {
+  document.querySelectorAll('.ranges').forEach(box => {
+    const section = box.dataset.ranges;
+    box.innerHTML = RANGES.map(r =>
+      `<button data-days="${r.days}"${range[section] === r.days ? ' class="active"' : ''}>${r.label}</button>`
+    ).join('');
+  });
+}
+drawRanges();  // the script runs after the markup, so the buttons exist now
+
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('.ranges button');
+  if (!btn || !currentUser) return;
+  const section = btn.closest('.ranges').dataset.ranges;
+  range[section] = Number(btn.dataset.days);
+  drawRanges();
+  // Refetch only the panels this picker feeds, not the whole dashboard.
+  const names = section === 'genres' ? ['tag-shift'] : ['binges', 'song-binges'];
+  const settled = await Promise.allSettled(names.map(n => get(currentUser, n, panelQs(n))));
+  const patch = {};
+  names.forEach((n, i) => { if (settled[i].status === 'fulfilled') patch[n] = settled[i].value; });
+  if (section === 'genres') renderGenres(patch['tag-shift'] || []);
+  else renderBinges(patch['song-binges'] || [], patch.binges || []);
+});
+
+// Both sections render from one place, so the full-dashboard draw and a range
+// change can't produce different markup.
+function renderGenres(tagShift) {
+  const gt = {};
+  (tagShift || []).forEach(r => gt[r.tag] = (gt[r.tag] || 0) + r.plays);
+  const genres = Object.entries(gt).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const gMax = genres.length ? genres[0][1] : 1;
+  $('genres').innerHTML = genres.map(([tag, plays]) => rankRow(genreBtn(tag), plays / gMax, plays + ' plays'))
+    .join('') || emptyMsg('no genre data in this range');
+}
+
+function renderBinges(songBinges, binges) {
+  $('song-binges').innerHTML = (songBinges || []).slice(0, 12).map(b => `<li class="t">
+    ${trackLink(b.artist_name, b.track_name)}
+    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays} plays in 7 days</div></li>`
+  ).join('') || emptyMsg('no track bursts in this range');
+  $('binges').innerHTML = (binges || []).slice(0, 12).map(b => `<li class="t">
+    <a class="alink" href="${lfmAlbum(b.artist_name, b.album_name)}" target="_blank" rel="noopener">${esc(b.album_name)}</a>
+    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays} plays in 7 days</div></li>`
+  ).join('') || emptyMsg('no album bursts in this range');
+}
 
 // Fetch every panel at once. allSettled so one slow or empty section can't
 // blank the dashboard -- it matters more now that reads no longer wait for the
@@ -578,12 +653,7 @@ function render(d) {
   barChart('hbars', 'hbar-labels', hours.slice(-12), m => Number(m.hours || 0));
   drawClock(clock);
 
-  const gt = {};
-  tagShift.forEach(r => gt[r.tag] = (gt[r.tag] || 0) + r.plays);
-  const genres = Object.entries(gt).sort((a, b) => b[1] - a[1]).slice(0, 12);
-  const gMax = genres.length ? genres[0][1] : 1;
-  $('genres').innerHTML = genres.map(([tag, plays]) => rankRow(genreBtn(tag), plays / gMax, plays + ' plays'))
-    .join('') || emptyMsg('no genre data yet');
+  renderGenres(tagShift);
 
   $('loyalty').innerHTML = loyalty.slice(0, 12).map(a =>
     rankRow(artistBtn(a.artist_name), Number(a.loyalty),
@@ -604,14 +674,7 @@ function render(d) {
       <td>${r.top_genre ? genreBtn(r.top_genre) : '<span class="sub">no data</span>'}</td></tr>`).join('')}</tbody>`
     : '<tbody><tr><td class="sub">no months yet</td></tr></tbody>';
 
-  $('song-binges').innerHTML = songBinges.slice(0, 12).map(b => `<li class="t">
-    ${trackLink(b.artist_name, b.track_name)}
-    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays} plays in 7 days</div></li>`
-  ).join('') || emptyMsg('no track bursts yet');
-  $('binges').innerHTML = binges.slice(0, 12).map(b => `<li class="t">
-    <a class="alink" href="${lfmAlbum(b.artist_name, b.album_name)}" target="_blank" rel="noopener">${esc(b.album_name)}</a>
-    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays} plays in 7 days</div></li>`
-  ).join('') || emptyMsg('no album bursts yet');
+  renderBinges(songBinges, binges);
 
   const gw = {};
   recs.songs_from_new_artists.forEach(s => (gw[s.artist_name] = gw[s.artist_name] || []).push(s.track_name));

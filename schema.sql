@@ -86,22 +86,51 @@ INSERT INTO tag_aliases (alias, canonical) VALUES
     ('alt rock','alternative rock')
 ON CONFLICT (alias) DO NOTHING;
 
+-- Context-sensitive tag suppression: "if an artist carries `context_tag`, that
+-- artist's `excluded_tag` is meaningless and gets dropped". The blocklist can't
+-- express this because it is unconditional, and these tags are only wrong in
+-- combination: "pop" on a Bollywood playback singer is Last.fm crowd shorthand
+-- for "popular music", not the Western pop genre, and it swamps the real tag in
+-- every genre chart. Same table shape and rolling-curation habit as the two
+-- lists above, so a new pair is one INSERT and no refetch.
+CREATE TABLE tag_exclusions (
+    context_tag  TEXT NOT NULL,
+    excluded_tag TEXT NOT NULL,
+    PRIMARY KEY (context_tag, excluded_tag)
+);
+INSERT INTO tag_exclusions (context_tag, excluded_tag) VALUES
+    ('bollywood','pop'),('bollywood','hip-hop'),
+    ('indian','pop'),('indian','hip-hop'),
+    ('india','pop'),('india','hip-hop')
+ON CONFLICT DO NOTHING;
+
 -- The one clean view of artist tags every genre query reads: lowercase/trim,
--- apply aliases, drop the '' sentinel and blocklisted tags, and collapse to one
--- row per (artist, canonical tag) keeping the strongest weight so joins can't
--- double-count a play.
+-- apply aliases, drop the '' sentinel and blocklisted tags, apply the exclusion
+-- pairs above, and collapse to one row per (artist, canonical tag) keeping the
+-- strongest weight so joins can't double-count a play.
 CREATE VIEW artist_tags_clean AS
-SELECT artist_name, tag, MAX(weight) AS weight
-FROM (
+WITH mapped AS (
     SELECT at.artist_name,
            COALESCE(al.canonical, lower(trim(at.tag))) AS tag,
            at.weight
     FROM artist_tags at
     LEFT JOIN tag_aliases al ON al.alias = lower(trim(at.tag))
     WHERE at.tag <> ''
-) mapped
-WHERE tag NOT IN (SELECT tag FROM tag_blocklist)
-GROUP BY artist_name, tag;
+),
+allowed AS (  -- unconditional drops first, so exclusions match canonical tags
+    SELECT * FROM mapped WHERE tag NOT IN (SELECT tag FROM tag_blocklist)
+)
+SELECT a.artist_name, a.tag, MAX(a.weight) AS weight
+FROM allowed a
+WHERE NOT EXISTS (
+    -- Drop this row if the SAME artist also carries a context tag that excludes it.
+    SELECT 1
+    FROM tag_exclusions x
+    JOIN allowed ctx
+      ON ctx.artist_name = a.artist_name AND ctx.tag = x.context_tag
+    WHERE x.excluded_tag = a.tag
+)
+GROUP BY a.artist_name, a.tag;
 
 -- Each artist's globally most-played tracks from artist.getTopTracks, best
 -- first (rank 1 = biggest). Feeds song recommendations: fetched nightly for

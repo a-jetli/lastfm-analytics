@@ -154,6 +154,20 @@ _LOCAL_DATE = "({col} AT TIME ZONE %s)::date"  # 1 param: tz
 _LOCAL_MONTH = "date_trunc('month', {col} AT TIME ZONE %s)::date"  # 1 param: tz
 _LOCAL_PERIOD = "date_trunc(%s, {col} AT TIME ZONE %s)::date"  # 2 params: bucket, tz
 
+
+def _recent(days: int | None, col: str = "listened_at") -> tuple[str, list]:
+    """SQL fragment + params restricting to the last `days` days, or nothing at
+    all when `days` is falsy. Returns ("", []) for all-time so callers can splice
+    it in unconditionally.
+
+    Powers the range picker on the Genres and On-repeat panels. Deliberately a
+    rolling window from now() rather than calendar periods: "last 30 days" should
+    mean the last 30 days, not "this month so far".
+    """
+    if not days:
+        return "", []
+    return f" AND {col} >= now() - make_interval(days => %s)", [days]
+
 PART_NAMES = ["night", "morning", "afternoon", "evening"]
 
 
@@ -212,16 +226,22 @@ def get_genre_clock(cur, user_id: int, tz: str = "UTC"):
     return cur.fetchall()
 
 
-def get_binges(cur, user_id: int, min_plays: int):
+def get_binges(cur, user_id: int, min_plays: int, days: int | None = None):
     """Albums played heavily in a short burst.
 
     The window counts, for each play, how many plays of that same album fall in
     the trailing 7-day span. The album's peak of that count is its burst size;
     keep albums whose peak hits min_plays. Album-less plays are excluded (a real
     album is required to call something a binge).
+
+    Two different spans, easy to confuse: the 7-day RANGE is what "binge" MEANS
+    and is fixed, while `days` limits which plays are considered at all and is
+    the range picker. days=30 asks "what did I binge in the last month", still
+    detected over 7-day bursts inside it.
     """
+    recent, recent_params = _recent(days)
     cur.execute(
-        """
+        f"""
         WITH counted AS (
             SELECT artist_name, album_name,
                    COUNT(*) OVER (
@@ -230,7 +250,7 @@ def get_binges(cur, user_id: int, min_plays: int):
                        RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW
                    ) AS plays_win
             FROM scrobbles
-            WHERE user_id = %s AND album_name IS NOT NULL AND album_name <> ''
+            WHERE user_id = %s AND album_name IS NOT NULL AND album_name <> ''{recent}
         )
         SELECT artist_name, album_name,
                MAX(plays_win) AS peak_plays
@@ -239,12 +259,13 @@ def get_binges(cur, user_id: int, min_plays: int):
         HAVING MAX(plays_win) >= %s
         ORDER BY peak_plays DESC
         """,
-        (user_id, min_plays),
+        [user_id] + recent_params + [min_plays],
     )
     return cur.fetchall()
 
 
-def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC"):
+def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC",
+                  days: int | None = None):
     """Tag mix over time: one row per (period, tag) with plays and
     pct_of_period, raw and chart-ready. `period` is "month" (default) or
     "week" (ISO, Monday start). Each play maps to its artist's primary tag, so
@@ -253,6 +274,8 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC"):
     # Whitelist the bucket, then pass it as a bound param (never interpolate).
     bucket = "week" if period == "week" else "month"
     period_start = _LOCAL_PERIOD.format(col="s.listened_at")
+    # `days` also drives the Genres panel, which sums these rows client-side.
+    recent, recent_params = _recent(days, "s.listened_at")
     cur.execute(
         _PRIMARY_TAG_CTE + f""",
         bucketed AS (
@@ -261,7 +284,7 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC"):
                    COUNT(*) AS plays
             FROM scrobbles s
             JOIN primary_tag p ON p.artist_name = s.artist_name
-            WHERE s.user_id = %s
+            WHERE s.user_id = %s{recent}
             GROUP BY period_start, p.tag
         )
         SELECT period_start,
@@ -272,7 +295,7 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC"):
         FROM bucketed
         ORDER BY period_start, plays DESC
         """,
-        (bucket, tz, user_id),
+        [bucket, tz, user_id] + recent_params,
     )
     return cur.fetchall()
 
@@ -616,12 +639,13 @@ def count_scrobbles(cur, user_id: int, search: str | None, start=None, end=None,
     return cur.fetchone()["total"]
 
 
-def get_song_binges(cur, user_id: int, min_plays: int):
+def get_song_binges(cur, user_id: int, min_plays: int, days: int | None = None):
     """Individual tracks played heavily in a short burst (the song-level twin of
-    get_binges). Same rolling-7-day-window peak; keep tracks whose peak hits
-    min_plays."""
+    get_binges). Same rolling-7-day-window peak, same `days` range picker; keep
+    tracks whose peak hits min_plays."""
+    recent, recent_params = _recent(days)
     cur.execute(
-        """
+        f"""
         WITH counted AS (
             SELECT artist_name, track_name,
                    COUNT(*) OVER (
@@ -630,7 +654,7 @@ def get_song_binges(cur, user_id: int, min_plays: int):
                        RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW
                    ) AS plays_win
             FROM scrobbles
-            WHERE user_id = %s
+            WHERE user_id = %s{recent}
         )
         SELECT artist_name, track_name,
                MAX(plays_win) AS peak_plays
@@ -640,7 +664,7 @@ def get_song_binges(cur, user_id: int, min_plays: int):
         ORDER BY peak_plays DESC
         LIMIT 25
         """,
-        (user_id, min_plays),
+        [user_id] + recent_params + [min_plays],
     )
     return cur.fetchall()
 
@@ -689,6 +713,12 @@ def get_compatibility(cur, a_id: int, b_id: int) -> dict:
     for row in cur.fetchall():
         target = a_plays if row["user_id"] == a_id else b_plays
         target[row["tag"]] = float(row["plays"])
+    if a_id == b_id:
+        # Comparing someone with themselves. The split above puts every row in
+        # a_plays and leaves b_plays empty, which scores 0% next to a full list
+        # of shared artists -- a visibly self-contradicting result, and typing
+        # your own handle into the compare box is the first thing anyone tries.
+        b_plays = dict(a_plays)
 
     # 2) Score = cosine similarity of the two vectors (reusing the recommender's
     #    function), shown as a 0-100 percentage.
