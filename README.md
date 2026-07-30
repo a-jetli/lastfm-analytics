@@ -58,8 +58,9 @@ Analytics endpoints, all under `/analytics/{user}`:
 ```
 /streaks          longest and current listening streak
 /discovery        new artists per month
-/loyalty          artists you keep coming back to
+/loyalty          how often you come back to an artist ("Heavy rotation" in the UI)
 /clock            per-day x part-of-day grid, one cell per real date
+/genre-clock      genre breakdown of a typical Friday night, Sunday morning, etc
 /summary          month by month digest
 /hours            listening hours, weekly or monthly
 /report           plays over time
@@ -72,6 +73,9 @@ Analytics endpoints, all under `/analytics/{user}`:
 /recommendations  artists to try, plus tracks
 /compatibility/{other}   taste overlap with another user
 ```
+
+`/loyalty`, `/tag-shift`, `/binges` and `/song-binges` take `?days=` to limit the
+window (0 = all time). Anything that buckets by date takes `?tz=`.
 
 Scrobble search takes field terms: `artist:`, `track:`, `album:`, `year:`,
 `month:`, `day:`, `date:`, `part:`, plus bare text. Quote values with spaces,
