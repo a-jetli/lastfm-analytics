@@ -9,12 +9,19 @@ BASE_URL = "http://ws.audioscrobbler.com/2.0"
 API_KEY = os.getenv("LASTFM_API_KEY")
 
 
+class LastfmUserNotFound(Exception):
+    """The handle isn't a real Last.fm user (API error 6). Distinct from a
+    transport/HTTP failure: a typo is permanent and should surface as a 404,
+    whereas a network blip is transient and should be retried."""
+
+
 def getrecents(
     username: str, page: int = 1, limit: int = 1000, since: int | None = None
 ) -> tuple[list, int]:
     """One page of scrobbles as (tracks, total_pages). `since` (unix ts) asks
     only for newer plays, which is what makes incremental sync possible. Big
-    pages are safe: pagination follows the totalPages the response reports."""
+    pages are safe: pagination follows the totalPages the response reports.
+    Raises LastfmUserNotFound for an unknown handle."""
 
     params = {
         "method": "user.getRecentTracks",
@@ -28,8 +35,17 @@ def getrecents(
         params["from"] = since
 
     r = requests.get(BASE_URL, params=params)
-    r.raise_for_status()  # crash codes
-    data = r.json()["recenttracks"]  # dig past Last.fm's envelope
+    # Last.fm signals "user not found" as HTTP 404 with a JSON body {"error":6}.
+    # Read the body BEFORE raise_for_status so we can tell that apart from a real
+    # transport failure (500, timeout) and raise a specific, non-retryable error.
+    try:
+        payload = r.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("error") == 6:
+        raise LastfmUserNotFound(username)
+    r.raise_for_status()  # any other HTTP error is transport-ish -> caller retries
+    data = payload["recenttracks"]  # dig past Last.fm's envelope
     total_pages = int(data.get("@attr", {}).get("totalPages", 1))
 
     raw = data.get("track", [])  # missing entirely when a page has no scrobbles

@@ -21,9 +21,11 @@ log = logging.getLogger(__name__)
 
 # Data older than this is re-synced on the next query. This is the "once a day".
 SYNC_INTERVAL = timedelta(days=1)
-# How long a request blocks waiting for a sync before letting it finish in the
-# background. Matches the frontend loading screen.
-WAIT_BUDGET_SECONDS = 7
+# How long the explicit join (POST /sync) blocks waiting for a sync before
+# letting it finish in the background. Only paid once now that reads use
+# wait=False, so it's kept short: enough for the first page of scrobbles to
+# land, then the status pill takes over reporting progress.
+WAIT_BUDGET_SECONDS = 4
 # Gap between any two Last.fm calls. The ToS publishes no number; serial calls
 # at 4/s are polite and have never been throttled.
 PAGE_PAUSE_SECONDS = 0.25
@@ -34,7 +36,25 @@ RECOMMEND_TOP_N = 20
 
 # user_id -> the thread currently syncing that user (in this process).
 _active: dict[int, threading.Thread] = {}
+# user_id -> which stage the sync is in: "pulling" (scrobbles) or "enriching"
+# (durations + genre tags, which is the slow part). Lets the status endpoint say
+# what's happening instead of showing a frozen play count. Shares _active_lock.
+_phase: dict[int, str] = {}
 _active_lock = threading.Lock()
+
+
+def _set_phase(user_id: int, phase: str | None) -> None:
+    with _active_lock:
+        if phase is None:
+            _phase.pop(user_id, None)
+        else:
+            _phase[user_id] = phase
+
+
+def sync_phase(user_id: int) -> str | None:
+    """Current sync stage for a user, or None if no sync is running."""
+    with _active_lock:
+        return _phase.get(user_id)
 
 
 def _is_stale(last_synced_at) -> bool:
@@ -44,14 +64,33 @@ def _is_stale(last_synced_at) -> bool:
     return datetime.now(timezone.utc) - last_synced_at > SYNC_INTERVAL
 
 
-def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = False) -> None:
+def is_syncing(user_id: int) -> bool:
+    """True if a sync thread for this user is running IN THIS PROCESS. Used by
+    the status endpoint to tell the frontend "still pulling". Cross-process syncs
+    (the scheduler in another worker) aren't visible here -- same limitation as
+    the _active map itself, which is why the advisory lock exists as the real
+    guard. Single-process deploy, so this is accurate in practice."""
+    with _active_lock:
+        thread = _active.get(user_id)
+        return bool(thread and thread.is_alive())
+
+
+def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = False,
+                 wait: bool = True) -> None:
     """Kick a sync if the user's data is new, stale, or `force` is set, then block
     up to WAIT_BUDGET_SECONDS for it to make progress. Returns immediately if data
     is already fresh (and not forced) or a sync is already running (we just wait on
     that one). `force=True` is for an explicit user action (pressing Load): it
     means "refresh me now" and bypasses the once-a-day staleness threshold. The
     sync is still incremental, so it only pulls plays since the last high-water
-    mark -- cheap even when forced."""
+    mark -- cheap even when forced.
+
+    `wait=False` kicks the sync but never blocks. Analytics reads use it: the
+    wait budget is meant to be paid ONCE, on the explicit join (POST /sync), so
+    the first paint has data. Paying it again on every read multiplied the
+    loading screen by the number of panels the page fetches -- the reads now
+    return whatever is committed so far and the frontend reports progress from
+    /sync/{user}/status instead."""
     with _active_lock:
         thread = _active.get(user_id)
         if thread and thread.is_alive():
@@ -68,9 +107,43 @@ def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = Fals
             thread.start()
         else:
             return  # fresh -- nothing to do
+    if not wait:
+        return  # sync is running in the background; caller reads what's committed
     # Wait OUTSIDE the lock so other users aren't blocked. If the sync isn't done
     # in WAIT_BUDGET_SECONDS the thread keeps running; we just return what's there.
     thread.join(timeout=WAIT_BUDGET_SECONDS)
+
+
+def join(username: str, force: bool = False, wait: bool = True) -> tuple[int, bool]:
+    """Resolve `username` to a user id, creating and kicking a sync on first
+    sight. Returns (user_id, is_new).
+
+    A brand-new handle is validated against Last.fm BEFORE its row is created, so
+    a typo can't leave a phantom user or a dashboard that loads forever. Raises
+    lastfm.LastfmUserNotFound for an unknown handle; a transient Last.fm outage
+    during that check is swallowed (we let them in and the background sync
+    retries, rather than blocking a join on a blip). Used by the join endpoint
+    and by compare, which must be able to pull in a second user on demand.
+    """
+    with db.get_connection() as conn, conn.cursor() as cur:
+        row = sync_queries.get_user(cur, username)
+    if row:
+        user_id, last_synced_at = row
+        ensure_fresh(user_id, username, last_synced_at, force=force, wait=wait)
+        return user_id, False
+
+    # New handle: confirm it exists before writing a row.
+    try:
+        lastfm.getrecents(username, page=1, limit=1)
+    except lastfm.LastfmUserNotFound:
+        raise
+    except Exception:
+        log.warning("could not pre-validate %s against Last.fm; joining anyway", username)
+
+    with db.get_connection() as conn, conn.cursor() as cur:
+        user_id = sync_queries.create_user(cur, username)
+    ensure_fresh(user_id, username, None, force=True, wait=wait)
+    return user_id, True
 
 
 def _run_sync(user_id: int, username: str, since: int | None) -> None:
@@ -85,6 +158,7 @@ def _run_sync(user_id: int, username: str, since: int | None) -> None:
                 return  # another process already has it
             synced = False
             try:
+                _set_phase(user_id, "pulling")  # fetching scrobble pages
                 _paginate(conn, cur, user_id, username, since)
                 synced = True
             finally:
@@ -92,19 +166,29 @@ def _run_sync(user_id: int, username: str, since: int | None) -> None:
                 # explicitly (closing the connection would also release it).
                 cur.execute("SELECT pg_advisory_unlock(%s)", (user_id,))
         # Enrich this user's new tracks right away (still in the background
-        # thread) so /hours and genre features work after a fresh sync.
+        # thread) so /hours and genre features work after a fresh sync. This is
+        # the slow stage (one Last.fm call per new track/artist), hence its own
+        # phase so the UI can say "adding genres" rather than look stuck.
         if synced:
+            _set_phase(user_id, "enriching")
             _backfill_durations(user_id)
             _backfill_artist_tags(user_id)
+    except lastfm.LastfmUserNotFound:
+        # The handle vanished from Last.fm (deleted account, rename). Nothing to
+        # pull; leave existing data alone. New-user typos are caught earlier in
+        # join(), so this only happens on a refresh of a once-valid user.
+        log.warning("Last.fm no longer knows user_id=%s (%s)", user_id, username)
     except Exception:
         # A failed sync leaves last_synced_at untouched -> still stale -> retried
         # on the next query. Never let a background error crash the app.
         log.exception("sync failed for user_id=%s", user_id)
     finally:
-        # Drop ourselves from the active map (only if we're still the entry).
+        # Drop ourselves from the active map + clear the phase (only if we're
+        # still the current entry).
         with _active_lock:
             if _active.get(user_id) is me:
                 del _active[user_id]
+                _phase.pop(user_id, None)
 
 
 def _paginate(conn, cur, user_id: int, username: str, since: int | None) -> None:
@@ -248,6 +332,8 @@ def _refresh_recommendations() -> None:
         artist_vectors = recommender.build_artist_vectors(corpus, idf)
 
         for user_id in recommend_queries.get_all_user_ids(cur):
+            # {artist: recency-weighted play score}. Keys are every artist the
+            # user has played (the exclusion set); values weight recent plays up.
             plays = dict(recommend_queries.get_user_plays(cur, user_id))
             user_vector = recommender.build_user_vector(plays, artist_vectors)
             if not user_vector:

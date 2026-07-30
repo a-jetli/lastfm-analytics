@@ -9,19 +9,24 @@
   (function () { try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'light'); } catch (e) {} })();
 </script>
 <style>
+  /* Cool Gradient Skies: violet #6331FF is the accent, peach #FFB68A the
+     counterweight, near-black #000001 and lavender #CEC8FA the poles. Light
+     mode sits on the pale lavender end of the ramp, dark mode on the deep
+     indigo end, so both are the same palette rather than two schemes. */
   :root {
-    --bg: #f7f1e5; --bg-2: #fffdf8; --raise: #fffdf8;
-    --ink: #211d17; --ink-2: #5c5648; --muted: #948d7c;
-    --line: rgba(33,29,23,.13); --chip: rgba(33,29,23,.05);
-    --accent: #f4512c; --accent-2: #0e9c8e; --on-accent: #fff;
+    --bg: #f6f5fe; --bg-2: #ffffff; --raise: #ffffff;
+    --ink: #09002c; --ink-2: #47179a; --muted: #595f61;
+    --line: rgba(9,0,44,.14); --chip: rgba(99,49,255,.07);
+    --accent: #6331ff; --accent-2: #f97a00; --on-accent: #ffffff;
     --display: "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   :root[data-theme="dark"] {
-    --bg: #17130d; --bg-2: #201b13; --raise: #241f16;
-    --ink: #f2ecdd; --ink-2: #bcb3a0; --muted: #8a8069;
-    --line: rgba(242,236,221,.13); --chip: rgba(242,236,221,.06);
-    --accent: #ff6a45; --accent-2: #35c9b6; --on-accent: #1a0e07;
+    --bg: #09002c; --bg-2: #150c40; --raise: #240855;
+    --ink: #f6f5fe; --ink-2: #cec8fa; --muted: #9089c0;
+    --line: rgba(206,200,250,.15); --chip: rgba(206,200,250,.07);
+    /* Lifted off #6331FF: the pure accent vibrates against a dark ground. */
+    --accent: #8a6af3; --accent-2: #ffb68a; --on-accent: #09002c;
   }
   * { box-sizing: border-box; margin: 0; }
   body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans);
@@ -45,7 +50,17 @@
   .iconbtn { background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-2);
              padding: 8px 11px; font-size: 15px; line-height: 1; }
   .iconbtn:hover { color: var(--ink); border-color: var(--accent); }
-  #status { color: var(--muted); font-size: 13px; }
+  /* Sync/progress pill: hidden when idle, prominent while a pull runs. A
+     pulsing dot signals live activity so it reads as "working", not static. */
+  #status:empty { display: none; }
+  #status:not(:empty) { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
+    color: var(--ink); padding: 7px 13px 7px 11px; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-2));
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  #status:not(:empty)::before { content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); animation: statpulse 1.1s ease-in-out infinite; }
+  @keyframes statpulse { 0%, 100% { opacity: .3; transform: scale(.7); } 50% { opacity: 1; transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { #status:not(:empty)::before { animation: none; } }
   .viewing { font-size: 13px; color: var(--muted); margin-top: 8px; }
   .viewing a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
   .rule { height: 1px; background: var(--line); margin: 16px 0 0; }
@@ -56,6 +71,8 @@
                 line-height: 1.1; letter-spacing: -.5px; }
   #landing h2 span { color: var(--accent); }
   #landing p { color: var(--ink-2); margin-top: 18px; font-size: 16px; }
+  #landing a { color: var(--accent); text-decoration: none; font-weight: 600; border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+  #landing a:hover { border-bottom-color: var(--accent); }
   #landing .hint { color: var(--muted); font-size: 14px; margin-top: 26px; }
 
   /* tabs */
@@ -90,8 +107,42 @@
   .xlabels { display: flex; gap: 7px; margin-top: 9px; }
   .xlabels span { flex: 1; text-align: center; font-size: 11px; color: var(--muted); }
 
-  .clock { display: grid; grid-template-columns: 22px repeat(24, 1fr); gap: 3px; font-size: 10px; color: var(--muted); }
-  .clock .cell { aspect-ratio: 1; border-radius: 2px; background: var(--chip); }
+  /* Calendar heatmap: x = one real date per column, y = part of day. Cell size
+     (--hc) is set per-render: cells grow to fill the width for a short history
+     and cap for a long one, where the strip scrolls instead. */
+  .hm { display: flex; gap: 8px; font-size: 10px; color: var(--muted); --hc: 13px; }
+  .hm-rowlabels { display: flex; flex-direction: column; gap: 3px; flex: none; width: 58px; padding-top: 16px; }
+  .hm-rowlabels span { height: var(--hc); line-height: var(--hc); white-space: nowrap; text-align: right; }
+  .hm-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; flex: 1; }
+  .hm-months { display: flex; gap: 3px; height: 16px; }
+  .hm-months span { flex: none; white-space: nowrap; }
+  .hm-days { display: flex; gap: 3px; }
+  .hm-col { display: flex; flex-direction: column; gap: 3px; flex: none; }
+  .hm-cell { width: var(--hc); height: var(--hc); border-radius: 2px; border: 0; padding: 0;
+    background: var(--chip); cursor: pointer; }
+  /* Five discrete steps, like a contributions graph: a continuous opacity ramp
+     makes neighbouring days indistinguishable. */
+  .hm-cell[data-lvl="1"] { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+  .hm-cell[data-lvl="2"] { background: color-mix(in srgb, var(--accent) 48%, transparent); }
+  .hm-cell[data-lvl="3"] { background: color-mix(in srgb, var(--accent) 72%, transparent); }
+  .hm-cell[data-lvl="4"] { background: var(--accent); }
+  .hm-cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .hm-cell[data-lvl="0"] { cursor: default; }
+  .hm-cell[data-lvl="0"]:hover { outline: 0; }
+  /* Custom heatmap tooltip: native title= waits ~1s before showing; this
+     appears on hover with no delay. */
+  .hm-tip { position: fixed; z-index: 40; pointer-events: none; opacity: 0;
+    background: var(--ink); color: var(--bg); font-size: 12px; font-weight: 500;
+    padding: 5px 9px; border-radius: 6px; white-space: nowrap;
+    transform: translate(-50%, calc(-100% - 8px)); box-shadow: 0 4px 14px rgba(9,0,44,.3);
+    transition: opacity .07s; }
+  .hm-tip.on { opacity: 1; }
+  .hm-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .hm-legend i { width: 13px; height: 13px; border-radius: 2px; background: var(--chip); display: inline-block; }
+  .hm-legend i[data-lvl="1"] { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+  .hm-legend i[data-lvl="2"] { background: color-mix(in srgb, var(--accent) 48%, transparent); }
+  .hm-legend i[data-lvl="3"] { background: color-mix(in srgb, var(--accent) 72%, transparent); }
+  .hm-legend i[data-lvl="4"] { background: var(--accent); }
 
   /* ranked meters */
   .ranked { display: grid; gap: 11px; }
@@ -121,6 +172,7 @@
   .rec .match .pct { font-size: 12px; color: var(--muted); }
   .rec .gw { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
   .rec .gw b { color: var(--muted); font-weight: 500; }
+  .rec .recby { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
   .tracklist { display: grid; gap: 0; }
   .tracklist .t { padding: 11px 0; border-top: 1px solid var(--line); font-size: 16px; }
   .tracklist .t:first-child { border-top: 0; }
@@ -134,14 +186,25 @@
   table.tbl { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
   table.tbl th, table.tbl td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line);
                                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  table.tbl th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  table.tbl th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+    position: relative; }
   table.tbl th.sortable { cursor: pointer; }
   table.tbl th.sortable:hover { color: var(--ink); }
+  /* Draggable column edge. Sits over the cell's right border. A faint grip line
+     hints it's draggable without shouting; it strengthens to the accent on hover. */
+  .col-resize { position: absolute; top: 0; right: -4px; width: 9px; height: 100%; cursor: col-resize; z-index: 2; }
+  .col-resize::after { content: ""; position: absolute; top: 25%; bottom: 25%; left: 4px; width: 2px;
+    border-radius: 2px; background: var(--line); transition: background .12s; }
+  .col-resize:hover::after { background: var(--accent); top: 0; bottom: 0; }
+  body.col-resizing { cursor: col-resize; user-select: none; }
+  body.col-resizing table.tbl tbody tr:hover { background: none; }
   table.tbl tbody tr:hover { background: var(--chip); }
   .filterbar { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
   .filterbar button { background: none; color: var(--accent); border: 0; padding: 0 0 0 8px; font-weight: 600; }
-  .pager { display: flex; gap: 8px; align-items: center; margin-top: 16px; font-size: 13px; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 16px; font-size: 13px; flex-wrap: wrap; }
   .pager button { background: var(--bg-2); color: var(--ink); border: 1px solid var(--line); }
+  .pager .pagesize { padding: 2px 9px; margin-left: 2px; }
+  .pager .pagesize[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 
   .sub { color: var(--muted); }
   .crow { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -154,9 +217,26 @@
   footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted);
            font-size: 13px; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
   footer a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
+  /* Search-tips popover: an on-demand affordance, not permanent chrome. Shown
+     on hover or keyboard focus so it stays reachable without a mouse. */
+  .tips { position: relative; }
+  .tips-btn { background: none; border: 0; padding: 0; color: var(--ink-2); font: inherit; font-weight: 400;
+    cursor: help; border-bottom: 1px dotted var(--line); border-radius: 0; }
+  .tips-btn:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .tips-pop { position: absolute; left: 0; top: calc(100% + 10px); z-index: 20;
+    width: min(440px, 88vw); padding: 14px 16px; background: var(--bg-2); color: var(--ink-2);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 34px rgba(9,0,44,.18);
+    font-size: 12.5px; line-height: 1.5; opacity: 0; visibility: hidden; transform: translateY(-4px);
+    transition: opacity .13s, transform .13s, visibility .13s; }
+  .tips:hover .tips-pop, .tips:focus-within .tips-pop { opacity: 1; visibility: visible; transform: translateY(0); }
+  .tips-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline;
+    margin: 9px 0; }
+  .tips-grid em { font-style: normal; color: var(--muted); }
+  .tips-pop code { background: var(--chip); color: var(--ink); border-radius: 3px; padding: 1px 5px;
+    font-size: 12px; white-space: nowrap; }
 
   /* modal */
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center;
+  .modal { position: fixed; inset: 0; background: rgba(9,0,44,.55); display: flex; align-items: center;
            justify-content: center; padding: 22px; z-index: 20; }
   .modal[hidden] { display: none; }
   .modal-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; max-width: 480px;
@@ -178,8 +258,8 @@
         <form class="search" id="form">
           <input id="user" placeholder="Last.fm username" required>
           <button>Load</button>
-          <span id="status"></span>
         </form>
+        <span id="status" role="status" aria-live="polite"></span>
         <button type="button" class="iconbtn" id="theme-toggle" aria-label="toggle light or dark">☾</button>
       </div>
     </div>
@@ -188,27 +268,27 @@
   </header>
 
   <section id="landing">
-    <h2>A record of how <span>someone listens</span>.</h2>
-    <p>Streaks, genres, loyal favourites and taste, drawn from a listener's scrobble history.</p>
-    <p class="hint">Enter a Last.fm username above to begin.</p>
+    <h2>I was frustrated with Spotify's lack of listening history and trends, so I <span>built the solution</span>.</h2>
+    <p>To start, log in or sign up at <a href="https://www.last.fm/join" target="_blank" rel="noopener">last.fm</a> and connect to whatever services you stream on. Everything you play after that gets tracked, letting you explore your full history, streaks, genres, trends, binges, taste shifts, and more.</p>
+    <p class="hint">Enter your Last.fm username above to begin.</p>
   </section>
 
   <div id="app" hidden>
     <nav class="tabs" id="tabs">
       <button data-tab="overview" class="active">Overview</button>
-      <button data-tab="trends">Trends</button>
+      <button data-tab="scrobbles" title="Your full play history: searchable and filterable by artist, track, album, year, month, weekday and part of day">Scrobbles</button>
       <button data-tab="taste">Taste</button>
+      <button data-tab="trends">Trends</button>
       <button data-tab="foryou">For you</button>
       <button data-tab="compare">Compare</button>
-      <button data-tab="scrobbles">Scrobbles</button>
     </nav>
 
     <section class="panel" data-panel="overview">
       <div class="stats">
-        <div class="stat"><div class="n" id="t-plays"></div><div class="l">plays</div></div>
-        <div class="stat"><div class="n" id="t-hours"></div><div class="l">hours</div></div>
-        <div class="stat"><div class="n" id="t-streak"></div><div class="l">longest streak</div></div>
-        <div class="stat"><div class="n" id="t-artists"></div><div class="l">artists</div></div>
+        <div class="stat"><div class="n" id="t-plays"></div><div class="l">total plays</div></div>
+        <div class="stat"><div class="n" id="t-hours"></div><div class="l">hours listened</div></div>
+        <div class="stat"><div class="n" id="t-streak"></div><div class="l">longest streak (days)</div></div>
+        <div class="stat"><div class="n" id="t-artists"></div><div class="l">artists played</div></div>
       </div>
       <section class="block">
         <div class="head"><h3>Plays</h3><span class="cap">by week, last 12</span></div>
@@ -217,8 +297,9 @@
         <div class="note">Click a bar to see that week's scrobbles.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>Listening clock</h3><span class="cap">by weekday &amp; hour, UTC</span></div>
+        <div class="head"><h3>Listening clock</h3><span class="cap" id="clock-cap">by day &amp; part of day</span></div>
         <div class="clock" id="clock"></div>
+        <div class="sub" style="margin-top:10px">Each column is a day. Click any block to see those plays in Scrobbles.</div>
       </section>
     </section>
 
@@ -227,14 +308,15 @@
         <div class="head"><h3>Listening hours</h3><span class="cap">by week, last 12</span></div>
         <div class="chart" id="hbars"></div>
         <div class="xlabels" id="hbar-labels"></div>
-        <div class="note">Click a bar for that week. A slight undercount — Last.fm has no stored length for some tracks, which count as zero.</div>
+        <div class="note">Click a bar for that week. Numbers are likely slightly lower than reality, since Last.fm has no stored length for some tracks, which count as zero.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>Month by month</h3></div>
-        <div class="scroll"><table class="tbl" id="highlights"></table></div>
+        <div class="head"><h3>Month by month</h3><span class="cap">plays, discoveries, hours and top genre</span></div>
+        <div class="scroll"><table class="tbl" id="summary"></table></div>
+        <div class="note">Genres come from Last.fm's community tags, so they reflect how listeners describe an artist, not an official classification.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>On repeat</h3><span class="cap">played hard inside a three-day stretch</span></div>
+        <div class="head"><h3>On repeat</h3><span class="cap">played hard inside a seven-day stretch</span></div>
         <div class="cols2">
           <div><div class="subh">Tracks</div><ul class="tracklist" id="song-binges"></ul></div>
           <div><div class="subh">Albums</div><ul class="tracklist" id="binges"></ul></div>
@@ -246,11 +328,12 @@
       <section class="block">
         <div class="head"><h3>Genres</h3><span class="cap">click one to see its tracks</span></div>
         <div class="ranked" id="genres"></div>
+        <div class="note">Genres come from Last.fm's community tags, so they reflect how listeners describe an artist, not an official classification.</div>
       </section>
       <section class="block">
         <div class="head"><h3>Loyalty</h3><span class="cap">artists with 5+ plays</span></div>
         <div class="ranked" id="loyalty"></div>
-        <div class="note">Full bar = played across many different days (a steady favourite). Short bar = many plays packed into a few days (a passing binge). Only artists with at least five plays appear.</div>
+        <div class="note">How often you still come back: the share of days since you first heard an artist that you actually played them. Full bar = in rotation ever since. Short bar = played a lot once, then moved on. Only artists with at least five plays appear.</div>
       </section>
     </section>
 
@@ -261,8 +344,8 @@
           <div class="reclist" id="recs"></div>
         </section>
         <section class="block">
-          <div class="head"><h3>Deep cuts</h3><span class="cap">by favourite artists, not yet played</span></div>
-          <div class="tracklist" id="deepcuts"></div>
+          <div class="head"><h3>From your favourites</h3><span class="cap">popular tracks you haven't played</span></div>
+          <div class="reclist" id="deepcuts"></div>
         </section>
       </div>
     </section>
@@ -274,7 +357,7 @@
           <input id="other" placeholder="another Last.fm username">
           <button>Compare</button>
         </form>
-        <div class="note">Enter any Last.fm username — if they're new, they'll be pulled in first (that can take a moment).</div>
+        <div class="note">Enter any Last.fm username. If they're new, they'll be pulled in first (that can take a moment).</div>
         <div id="compat" style="margin-top:20px"></div>
       </section>
     </section>
@@ -283,8 +366,26 @@
       <section class="block">
         <div class="head"><h3>Scrobbles</h3></div>
         <form class="search" id="scrob-form">
-          <input id="scrob-search" placeholder="search artist or track">
+          <input id="scrob-search" placeholder="search, or filter with artist: year: month: day: part:">
           <button>Search</button>
+          <span class="tips">
+            <button type="button" class="tips-btn" aria-describedby="tips-pop">search tips</button>
+            <span class="tips-pop" id="tips-pop" role="tooltip">
+              Plain text matches artist or track. Narrow with filters:
+              <span class="tips-grid">
+                <code>artist:Logic</code><em>an artist</em>
+                <code>track:Alright</code><em>a track title</em>
+                <code>album:Nostalgia</code><em>an album</em>
+                <code>year:2026</code><em>a calendar year</em>
+                <code>month:january</code><em>a month, any year (or jan, or 1)</em>
+                <code>date:2026-07-15</code><em>one day (ISO)</em>
+                <code>day:friday</code><em>a weekday, every week (or fri)</em>
+                <code>part:night</code><em>night / morning / afternoon / evening</em>
+              </span>
+              Combine freely, and quote values with spaces: <code>artist:"Tyler, the Creator"</code>.
+              Tip: click a bar or a heatmap block to jump here pre-filtered.
+            </span>
+          </span>
         </form>
         <div class="filterbar" id="scrob-filter" hidden></div>
         <div class="scroll" style="margin-top:14px"><table class="tbl" id="scrobbles"></table></div>
@@ -292,6 +393,10 @@
           <button id="prev" type="button">Prev</button>
           <button id="next" type="button">Next</button>
           <span class="sub" id="scrob-range"></span>
+          <span class="sub" style="margin-left:auto">
+            Rows <button class="pagesize" type="button" data-size="50">50</button>
+            <button class="pagesize" type="button" data-size="200">200</button>
+          </span>
         </div>
       </section>
     </section>
@@ -341,11 +446,81 @@ applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
 let currentUser = null;
 const hist = { offset: 0, search: '', sort: 'listened_at', dir: 'desc', pageSize: 50, start: null, end: null };
 
+// The browser's IANA zone (e.g. "America/New_York"), sent to /clock and
+// /scrobbles so "morning" means the listener's morning and a clicked cell
+// returns the same rows it counted. Postgres resolves DST per play.
+const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+  catch (e) { return 'UTC'; } })();
+const TZ_LABEL = TZ.split('/').pop().replace(/_/g, ' ');
+
 function switchTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.hidden = p.dataset.panel !== name);
 }
 $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) switchTab(b.dataset.tab); });
+
+const PANELS = ['report','streaks','discovery','clock','hours','tag-shift',
+                'loyalty','summary','binges','song-binges','recommendations'];
+// tz goes on EVERY panel, not just the clock. Any endpoint that buckets by day,
+// week or month needs the listener's zone: on server-time buckets a 9pm play
+// lands on tomorrow, which invents streaks and shifts month boundaries. Panels
+// that don't bucket by date ignore the param.
+const panelQs = n => `tz=${enc(TZ)}` + ((n === 'report' || n === 'hours') ? '&period=week' : '');
+
+// Fetch every panel at once. allSettled so one slow or empty section can't
+// blank the dashboard -- it matters more now that reads no longer wait for the
+// sync, because early panels legitimately come back thin.
+async function fetchPanels(user) {
+  const settled = await Promise.allSettled(PANELS.map(n => get(user, n, panelQs(n))));
+  if (settled.every(r => r.status === 'rejected')) throw new Error(settled[0].reason.message);
+  const d = {};
+  PANELS.forEach((n, i) => d[n] = settled[i].status === 'fulfilled' ? settled[i].value : null);
+  return { d, failed: settled.filter(r => r.status === 'rejected').length };
+}
+
+// While the background pull runs, poll for progress and redraw once it lands.
+// The reads themselves never block (see routers/analytics.py _prepare), so this
+// is what turns "frozen spinner" into a live count.
+let syncPoll = null;
+async function watchSync(user) {
+  clearInterval(syncPoll); syncPoll = null;
+  const stop = () => { clearInterval(syncPoll); syncPoll = null; };
+  let lastPhase = 'init';  // redraw the dashboard on each phase change, not every tick
+
+  // Returns true while the pull is still running (keep polling), false once
+  // it's done or the user switched away.
+  const tick = async () => {
+    if (user !== currentUser) return false;
+    let s;
+    try { s = await fetch(`${API}/sync/${enc(user)}/status`).then(r => r.json()); }
+    catch { return true; }  // transient; try again on the next tick
+    const phase = s.syncing ? (s.phase || 'pulling') : 'done';
+    // On any stage change refresh the panels so charts fill in as data lands
+    // (scrobbles done -> full charts; enrichment done -> hours & genres).
+    if (phase !== lastPhase) {
+      lastPhase = phase;
+      try { const { d } = await fetchPanels(user); if (user === currentUser) { render(d); loadScrobbles(); } }
+      catch { /* keep what's on screen; still valid, just older */ }
+    }
+    if (user !== currentUser) return false;
+    if (phase === 'pulling') {
+      $('status').textContent = `pulling your history from Last.fm: ${Number(s.scrobbles).toLocaleString()} plays so far`;
+      return true;
+    }
+    if (phase === 'enriching') {
+      $('status').textContent = 'almost there: adding genres and play lengths in the background';
+      return true;
+    }
+    // Done for now. last_synced_at null means the full pull didn't finish; the
+    // data shown is partial and the background job will retry on its own.
+    $('status').textContent = s.last_synced_at
+      ? '' : 'sync didn’t finish; showing what loaded so far, it will keep trying.';
+    return false;
+  };
+
+  if (!(await tick())) return;
+  syncPoll = setInterval(async () => { if (!(await tick())) stop(); }, 2500);
+}
 
 $('form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -353,14 +528,18 @@ $('form').addEventListener('submit', async e => {
   if (!user) return;
   $('status').textContent = 'loading…';
   try {
-    const sync = await fetch(`${API}/sync/${enc(user)}`, {method: 'POST'}).then(r => r.json());
-    const names = ['report','streaks','discovery','clock','hours','tag-shift',
-                   'loyalty','highlights','binges','song-binges','recommendations'];
-    const qsFor = n => (n === 'report' || n === 'hours') ? 'period=week' : '';
-    const settled = await Promise.allSettled(names.map(n => get(user, n, qsFor(n))));
-    if (settled.every(r => r.status === 'rejected')) throw new Error(settled[0].reason.message);
-    const d = {};
-    names.forEach((n, i) => d[n] = settled[i].status === 'fulfilled' ? settled[i].value : null);
+    // The one place that waits on the sync: it blocks up to the server's budget
+    // so the first paint has data. A 404 here means Last.fm doesn't know the
+    // handle (validated before any row is created), so surface it plainly and
+    // stop -- don't fall through to a dashboard full of empty panels.
+    const res = await fetch(`${API}/sync/${enc(user)}`, {method: 'POST'});
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(res.status === 404
+        ? `No Last.fm user named “${user}”. Check the spelling.`
+        : (body.detail || `sync failed (${res.status})`));
+    }
+    const { d, failed } = await fetchPanels(user);
 
     currentUser = user;
     render(d);
@@ -372,16 +551,21 @@ $('form').addEventListener('submit', async e => {
     $('viewing').innerHTML = `viewing <a href="${lfmUser(user)}" target="_blank" rel="noopener">${esc(user)} ↗</a> on Last.fm`;
     $('foot-user').innerHTML = `<a href="${lfmUser(user)}" target="_blank" rel="noopener">${esc(user)}'s Last.fm</a>`;
 
-    const failed = settled.filter(r => r.status === 'rejected').length;
-    $('status').textContent = failed ? `${failed} section(s) unavailable, try again shortly`
-      : sync.status === 'syncing' ? 'first sync running — numbers may still grow' : '';
+    $('status').textContent = failed ? `${failed} section(s) unavailable, try again shortly` : '';
+    watchSync(user);  // shows progress and redraws if the pull is still running
   } catch (err) { $('status').textContent = 'could not load: ' + err.message; }
 });
+
+// Recommendation match display. Tag-cosine rarely clears ~0.5 even for a great
+// fit, so these bands are calibrated to that reality, not to a naive 0-100 read
+// where everything looks like a poor match. Heuristic, tune freely.
+const MATCH_FULL = 0.5;  // cosine treated as a full bar; the meter is a fraction of this
+const matchLabel = s => s >= 0.40 ? 'strong' : s >= 0.28 ? 'solid' : s >= 0.16 ? 'moderate' : 'loose';
 
 function render(d) {
   const report = d.report || [], streaks = d.streaks || [], discovery = d.discovery || [];
   const clock = d.clock || [], hours = d.hours || [], loyalty = d.loyalty || [];
-  const highlights = d.highlights || [], binges = d.binges || [], songBinges = d['song-binges'] || [];
+  const summary = d.summary || [], binges = d.binges || [], songBinges = d['song-binges'] || [];
   const tagShift = d['tag-shift'] || [];
   const recs = d.recommendations || {artists: [], songs_from_favorites: [], songs_from_new_artists: []};
 
@@ -402,46 +586,58 @@ function render(d) {
     .join('') || emptyMsg('no genre data yet');
 
   $('loyalty').innerHTML = loyalty.slice(0, 12).map(a =>
-    rankRow(artistBtn(a.artist_name), Number(a.loyalty), `${a.plays} plays · ${a.active_days}/${a.span_days} days`))
+    rankRow(artistBtn(a.artist_name), Number(a.loyalty),
+            `${a.plays} plays · active ${a.active_days} of ${a.days_since_first_play} days since you found them`))
     .join('') || emptyMsg('need a few more plays per artist');
 
-  const hi = highlights.slice(-12).reverse();
-  $('highlights').innerHTML = hi.length ? `
-    <thead><tr><th style="width:16%">Month</th><th style="width:32%">Most played</th>
-      <th style="width:32%">Top new find</th><th style="width:20%">Returning</th></tr></thead>
-    <tbody>${hi.map(r => `<tr>
-      <td>${esc(String(r.month).slice(0, 7))}</td>
-      <td>${artistBtn(r.most_played_artist)} <span class="sub">${r.most_played_plays}</span></td>
-      <td>${r.top_new_artist ? artistBtn(r.top_new_artist) + ' <span class="sub">' + r.top_new_plays + '</span>' : '<span class="sub">—</span>'}</td>
-      <td>${r.revisited_artists}</td></tr>`).join('')}</tbody>`
+  const fmtMonth = m => { const [y, mo] = String(m).split('-'); return `${MON_ABBR[+mo - 1]} ${y}`; };
+  const sm = summary.slice().reverse();  // newest month first
+  $('summary').innerHTML = sm.length ? `
+    <thead><tr><th style="width:26%">Month</th><th style="width:16%">Plays</th>
+      <th style="width:20%">New artists</th><th style="width:14%">Hours</th>
+      <th style="width:24%">Top genre</th></tr></thead>
+    <tbody>${sm.map(r => `<tr>
+      <td>${fmtMonth(r.month)}</td>
+      <td>${Number(r.plays).toLocaleString()}</td>
+      <td>${Number(r.new_artists).toLocaleString()}</td>
+      <td>${Math.round(Number(r.hours || 0)).toLocaleString()}</td>
+      <td>${r.top_genre ? genreBtn(r.top_genre) : '<span class="sub">no data</span>'}</td></tr>`).join('')}</tbody>`
     : '<tbody><tr><td class="sub">no months yet</td></tr></tbody>';
 
   $('song-binges').innerHTML = songBinges.slice(0, 12).map(b => `<li class="t">
     ${trackLink(b.artist_name, b.track_name)}
-    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays_in_3_days} plays in 3 days</div></li>`
+    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays} plays in 7 days</div></li>`
   ).join('') || emptyMsg('no track bursts yet');
   $('binges').innerHTML = binges.slice(0, 12).map(b => `<li class="t">
     <a class="alink" href="${lfmAlbum(b.artist_name, b.album_name)}" target="_blank" rel="noopener">${esc(b.album_name)}</a>
-    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays_in_3_days} plays in 3 days</div></li>`
+    <div class="by">${artistBtn(b.artist_name)} · ${b.peak_plays} plays in 7 days</div></li>`
   ).join('') || emptyMsg('no album bursts yet');
 
   const gw = {};
   recs.songs_from_new_artists.forEach(s => (gw[s.artist_name] = gw[s.artist_name] || []).push(s.track_name));
-  const top = recs.artists[0] ? recs.artists[0].score : 1;
   $('recs').innerHTML = recs.artists.map((a, i) => {
-    const pct = Math.round(100 * a.score / (top || 1));
+    // Absolute cosine (0-1), NOT scaled to the batch's best. The old "% match"
+    // divided by the top score, so the #1 pick was always 100% even when the
+    // whole batch was weak. Now the bar is a fraction of MATCH_FULL (a fixed
+    // "strong tag match"), and the label is the honest similarity band + value.
+    const pct = Math.min(100, Math.round(100 * a.score / MATCH_FULL));
     const tracks = (gw[a.artist_name] || []).slice(0, 3);
     const gwHtml = tracks.length
       ? `<div class="gw"><b>Start with</b> ${tracks.map(t => trackLink(a.artist_name, t)).join(' · ')}</div>` : '';
     return `<div class="rec"><div class="rk">${String(i + 1).padStart(2, '0')}</div><div>
       <div class="name">${artistBtn(a.artist_name)}</div>
-      <div class="match"><span class="meter"><span style="width:${pct}%"></span></span><span class="pct">${pct}% match</span></div>
+      <div class="match"><span class="meter"><span style="width:${pct}%"></span></span>
+        <span class="pct" title="cosine similarity of genre tags, 0 to 1">${matchLabel(a.score)} · ${a.score.toFixed(2)}</span></div>
       ${gwHtml}</div></div>`;
-  }).join('') || emptyMsg('recommendations are computed nightly — check back tomorrow');
+  }).join('') || emptyMsg('recommendations are computed nightly, check back tomorrow');
 
-  $('deepcuts').innerHTML = recs.songs_from_favorites.map(s => `<div class="t">
-    ${trackLink(s.artist_name, s.track_name)}<div class="by">${artistBtn(s.artist_name)}</div></div>`
-  ).join('') || emptyMsg('nothing yet');
+  // Same numbered .rec skeleton as "Artists to explore" so the two For-you
+  // columns read as one design: rank, a title line, a muted sub-line.
+  $('deepcuts').innerHTML = recs.songs_from_favorites.map((s, i) => `
+    <div class="rec"><div class="rk">${String(i + 1).padStart(2, '0')}</div><div>
+      <div class="name">${trackLink(s.artist_name, s.track_name)}</div>
+      <div class="recby">${artistBtn(s.artist_name)}</div></div></div>`
+  ).join('') || emptyMsg('nothing yet, computed nightly');
 }
 
 function rankRow(kHtml, frac, valText) {
@@ -460,20 +656,120 @@ function barChart(barsId, labelsId, rows, valOf) {
   $(labelsId).innerHTML = rows.map(r => `<span>${esc(fmtWeek(r.month))}</span>`).join('');
 }
 
+// Must match PART_NAMES in queries/analytics.py: the cell a user clicks becomes
+// a date:/part: search and the backend re-derives the same buckets. Index order.
+const PARTS = ['night', 'morning', 'afternoon', 'evening'];
+const PART_HOURS = ['12-6am', '6am-12pm', '12-6pm', '6pm-12am'];
+const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Continuous counts -> 5 discrete levels (0=empty, then quartered against the
+// busiest cell), the contributions-graph convention.
+const heatLevel = (n, max) => n <= 0 ? 0 : Math.min(4, 1 + Math.floor((n / max) * 3.999));
+
+let lastClockRows = null;  // cached so a window resize can rescale without a refetch
+
 function drawClock(rows) {
+  lastClockRows = rows;
+  // rows: {day: 'YYYY-MM-DD', part: 0-3, plays}. Only non-empty (day,part) come
+  // back; the grid below fills every day in the span so gaps stay visible.
   const byCell = {}; let cmax = 1;
-  rows.forEach(r => { byCell[r.weekday + '-' + r.hour] = r.plays; cmax = Math.max(cmax, r.plays); });
-  const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-  let html = '<span></span>' + [...Array(24).keys()].map(h => `<span>${h % 6 ? '' : h}</span>`).join('');
-  days.forEach((d, w) => {
-    html += `<span>${d}</span>` + [...Array(24).keys()].map(h => {
-      const n = byCell[w + '-' + h] || 0;
-      const bg = n ? `style="background:var(--accent);opacity:${(0.18 + 0.82 * n / cmax).toFixed(2)}"` : '';
-      return `<div class="cell" ${bg} title="${d} ${h}:00 — ${n} plays"></div>`;
+  rows.forEach(r => { byCell[r.day + '|' + r.part] = r.plays; cmax = Math.max(cmax, r.plays); });
+
+  // Walk every calendar day from the first with plays to today, so idle days
+  // are empty columns rather than missing ones (a real gap in the timeline).
+  const dates = Object.keys(byCell).map(k => k.split('|')[0]).sort();
+  if (!dates.length) { $('clock').innerHTML = emptyMsg('no plays yet'); return; }
+  const start = new Date(dates[0] + 'T00:00:00'), today = new Date(isoDate(new Date()) + 'T00:00:00');
+  const cols = [];
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) cols.push(new Date(d));
+
+  const rowLabels = PARTS.map((p, i) =>
+    `<span title="${PART_HOURS[i]}">${p}</span>`).join('');
+
+  // Month ruler: label a column only where its month changes, so "Jun … Jul"
+  // sits above the first day of each month.
+  let lastMonth = -1;
+  const months = cols.map(d => {
+    const m = d.getMonth(), show = m !== lastMonth; lastMonth = m;
+    return `<span>${show ? MON_ABBR[m] : ''}</span>`;
+  }).join('');
+
+  const days = cols.map(d => {
+    const iso = isoDate(d);
+    const cells = PARTS.map((p, i) => {
+      const n = byCell[iso + '|' + i] || 0;
+      const lvl = heatLevel(n, cmax);
+      const label = `${WEEKDAY[d.getDay()]} ${MON_ABBR[d.getMonth()]} ${d.getDate()} · ${p} (${PART_HOURS[i]}) · ${n} play${n === 1 ? '' : 's'}`;
+      return `<button class="hm-cell" type="button" data-lvl="${lvl}"
+        data-date="${iso}" data-part="${p}" data-tip="${label}"></button>`;
     }).join('');
-  });
-  $('clock').innerHTML = html;
+    return `<div class="hm-col">${cells}</div>`;
+  }).join('');
+
+  // Size cells to fill the width for a short history, cap (and scroll) for a
+  // long one, so 7 weeks don't sit as a small strip in an empty container. 58px
+  // row-label column + 8px gap + 3px between columns.
+  const GAP = 3, ROWLABELS = 58 + 8, MIN = 13, MAX = 30;
+  const avail = ($('clock').clientWidth || 900) - ROWLABELS;
+  const fit = Math.floor((avail - (cols.length - 1) * GAP) / cols.length);
+  const hc = Math.max(MIN, Math.min(MAX, fit));
+  // Even at the max cell size a tiny history won't fill the row: center it then,
+  // rather than leaving it stranded against the left edge.
+  const naturalW = cols.length * hc + (cols.length - 1) * GAP;
+  const center = naturalW < avail ? 'justify-content:center' : '';
+
+  $('clock').innerHTML = `<div class="hm" style="--hc:${hc}px">
+      <div class="hm-rowlabels">${rowLabels}</div>
+      <div class="hm-scroll"><div class="hm-months" style="${center}">${months}</div>
+        <div class="hm-days" style="${center}">${days}</div></div>
+    </div>
+    <div class="hm-legend">Less <i data-lvl="1"></i><i data-lvl="2"></i><i data-lvl="3"></i><i data-lvl="4"></i> More</div>`;
+  $('clock-cap').textContent = `by day & part of day · ${TZ_LABEL}`;
+  // Pin to the newest day only when the strip actually overflows; a centered,
+  // non-scrolling strip has nowhere to go and would otherwise jump.
+  if (!center) { const sc = $('clock').querySelector('.hm-scroll'); if (sc) sc.scrollLeft = sc.scrollWidth; }
 }
+
+// Rescale the heatmap on resize (debounced) so cells keep filling the width.
+let clockResize = null;
+window.addEventListener('resize', () => {
+  if (!lastClockRows) return;
+  clearTimeout(clockResize);
+  clockResize = setTimeout(() => drawClock(lastClockRows), 150);
+});
+
+// Fast heatmap tooltip: one reused element, shown on hover with no delay (the
+// native title= tooltip waits ~1s). Positioned above the hovered cell.
+const hmTip = document.createElement('div');
+hmTip.className = 'hm-tip';
+document.body.appendChild(hmTip);
+$('clock').addEventListener('mouseover', e => {
+  const cell = e.target.closest('.hm-cell[data-tip]');
+  if (!cell) return;
+  const r = cell.getBoundingClientRect();
+  hmTip.textContent = cell.dataset.tip;
+  hmTip.style.left = (r.left + r.width / 2) + 'px';
+  hmTip.style.top = r.top + 'px';
+  hmTip.classList.add('on');
+});
+$('clock').addEventListener('mouseout', e => {
+  if (e.target.closest('.hm-cell')) hmTip.classList.remove('on');
+});
+// The strip scrolls, so hide the tip on scroll rather than let it drift.
+$('clock').addEventListener('scroll', () => hmTip.classList.remove('on'), true);
+
+// Clicking a block jumps to Scrobbles pre-filtered to exactly that day + part.
+$('clock').addEventListener('click', e => {
+  const cell = e.target.closest('.hm-cell[data-date]');
+  if (!cell || cell.dataset.lvl === '0') return;
+  const query = `date:${cell.dataset.date} part:${cell.dataset.part}`;
+  Object.assign(hist, { search: query, start: null, end: null, offset: 0 });
+  $('scrob-search').value = query;
+  switchTab('scrobbles'); updateScrobFilter(); loadScrobbles();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
 
 // clicks: artist -> modal, genre -> modal, bar -> that week's scrobbles
 document.body.addEventListener('click', e => {
@@ -542,19 +838,26 @@ $('scrob-filter').addEventListener('click', e => {
   }
 });
 
-// scrobble history
-const HIST_COLS = [['listened_at', 'When', '26%'], ['track_name', 'Track', '30%'],
-                   ['artist_name', 'Artist', '26%'], ['album_name', 'Album', '18%']];
+// scrobble history. Column widths live here (percent) so they survive every
+// sort and page reload -- the thead is rebuilt each load and reads from colW.
+// Defaults: When is narrow (dates are short) and the rest sit left of it.
+const HIST_COLS = [['listened_at', 'When'], ['track_name', 'Track'],
+                   ['artist_name', 'Artist'], ['album_name', 'Album']];
+const colW = { listened_at: 18, track_name: 34, artist_name: 28, album_name: 20 };
+const MIN_COL = 8;  // percent floor so a column can't be dragged to nothing
 async function loadScrobbles() {
   if (!currentUser) return;
-  let qs = `search=${enc(hist.search)}&limit=${hist.pageSize}&offset=${hist.offset}&sort=${hist.sort}&dir=${hist.dir}`;
+  let qs = `search=${enc(hist.search)}&limit=${hist.pageSize}&offset=${hist.offset}&sort=${hist.sort}&dir=${hist.dir}&tz=${enc(TZ)}`;
   if (hist.start) qs += `&start=${hist.start}&end=${hist.end}`;
-  let rows;
-  try { rows = await get(currentUser, 'scrobbles', qs); }
+  let data;
+  try { data = await get(currentUser, 'scrobbles', qs); }
   catch { $('scrobbles').innerHTML = '<tbody><tr><td class="sub">could not load history</td></tr></tbody>'; return; }
-  const head = '<thead><tr>' + HIST_COLS.map(([k, label, w]) => {
+  const rows = data.rows, total = data.total;
+  const head = '<thead><tr>' + HIST_COLS.map(([k, label], idx) => {
     const arr = hist.sort === k ? (hist.dir === 'asc' ? ' ↑' : ' ↓') : '';
-    return `<th class="sortable" data-key="${k}" style="width:${w}">${label}${arr}</th>`;
+    // Every column but the last gets a drag handle on its right edge.
+    const grip = idx < HIST_COLS.length - 1 ? `<span class="col-resize" data-col="${k}"></span>` : '';
+    return `<th class="sortable" data-key="${k}" style="width:${colW[k]}%">${label}${arr}${grip}</th>`;
   }).join('') + '</tr></thead>';
   const body = rows.length ? `<tbody>${rows.map(r => `<tr>
       <td class="sub">${new Date(r.listened_at).toLocaleString()}</td>
@@ -563,11 +866,50 @@ async function loadScrobbles() {
       <td class="sub">${esc(r.album_name)}</td></tr>`).join('')}</tbody>`
     : '<tbody><tr><td class="sub">no matches</td></tr></tbody>';
   $('scrobbles').innerHTML = head + body;
-  $('scrob-range').textContent = rows.length ? `${hist.offset + 1}–${hist.offset + rows.length}` : '';
+  // Real total, so the range is honest and Next knows exactly where the end is
+  // (a full last page used to leave Next enabled onto an empty one).
+  $('scrob-range').textContent = total
+    ? `${(hist.offset + 1).toLocaleString()}-${(hist.offset + rows.length).toLocaleString()} of ${total.toLocaleString()}`
+    : 'no matches';
   $('prev').disabled = hist.offset === 0;
-  $('next').disabled = rows.length < hist.pageSize;
+  $('next').disabled = hist.offset + rows.length >= total;
 }
+
+// Drag a column edge to resize. The dragged column and its right neighbour
+// trade width so the table always sums to 100% and nothing else jumps.
+let resizing = null;
+$('scrobbles').addEventListener('mousedown', e => {
+  const grip = e.target.closest('.col-resize');
+  if (!grip) return;
+  e.preventDefault();  // don't start a selection or fall through to the sort
+  const key = grip.dataset.col;
+  const idx = HIST_COLS.findIndex(([k]) => k === key);
+  const nextKey = HIST_COLS[idx + 1][0];
+  const tableW = $('scrobbles').getBoundingClientRect().width;
+  resizing = { key, nextKey, startX: e.clientX, tableW, w0: colW[key], wNext0: colW[nextKey] };
+  document.body.classList.add('col-resizing');
+});
+document.addEventListener('mousemove', e => {
+  if (!resizing) return;
+  const { key, nextKey, startX, tableW, w0, wNext0 } = resizing;
+  let delta = (e.clientX - startX) / tableW * 100;
+  delta = Math.max(delta, MIN_COL - w0);       // this column can't go below the floor
+  delta = Math.min(delta, wNext0 - MIN_COL);   // nor can its neighbour
+  colW[key] = w0 + delta;
+  colW[nextKey] = wNext0 - delta;
+  const th = $('scrobbles').querySelector(`th[data-key="${key}"]`);
+  const thN = $('scrobbles').querySelector(`th[data-key="${nextKey}"]`);
+  if (th) th.style.width = colW[key] + '%';
+  if (thN) thN.style.width = colW[nextKey] + '%';
+});
+document.addEventListener('mouseup', () => {
+  if (!resizing) return;
+  resizing = null;
+  document.body.classList.remove('col-resizing');
+});
+
 $('scrobbles').addEventListener('click', e => {
+  if (e.target.closest('.col-resize')) return;  // a resize grip, not a sort click
   const th = e.target.closest('th[data-key]'); if (!th) return;
   const k = th.dataset.key;
   if (hist.sort === k) hist.dir = hist.dir === 'asc' ? 'desc' : 'asc';
@@ -582,20 +924,43 @@ $('scrob-form').addEventListener('submit', e => {
 $('prev').addEventListener('click', () => { hist.offset = Math.max(0, hist.offset - hist.pageSize); loadScrobbles(); });
 $('next').addEventListener('click', () => { hist.offset += hist.pageSize; loadScrobbles(); });
 
+// Rows-per-page toggle. 200 is the server's clamp (routers/analytics.py), so
+// there's no point offering more. Jumping back to offset 0 keeps the range
+// label truthful -- switching size mid-scroll would land on an arbitrary row.
+function setPageSize(size) {
+  hist.pageSize = size; hist.offset = 0;
+  document.querySelectorAll('.pagesize').forEach(b =>
+    b.setAttribute('aria-pressed', String(Number(b.dataset.size) === size)));
+  loadScrobbles();
+}
+document.querySelector('.pager').addEventListener('click', e => {
+  const b = e.target.closest('.pagesize');
+  if (b) setPageSize(Number(b.dataset.size));
+});
+setPageSize(50);
+
 // compatibility
 $('compat-form').addEventListener('submit', async e => {
   e.preventDefault();
   const other = $('other').value.trim();
   if (!other || !currentUser) return;
-  $('compat').innerHTML = '<span class="sub">comparing…</span>';
+  $('compat').innerHTML = '<span class="sub">comparing… (pulling them in if they\'re new)</span>';
   let c;
   try { c = await get(currentUser, `compatibility/${enc(other)}`); }
-  catch (err) { $('compat').innerHTML = `<span class="sub">could not compare: ${esc(err.message)}</span>`; return; }
+  catch (err) {
+    const msg = /404/.test(err.message) ? `No Last.fm user named “${other}”. Check the spelling.`
+      : `could not compare: ${err.message}`;
+    $('compat').innerHTML = `<span class="sub">${esc(msg)}</span>`; return;
+  }
+  // Genres need the tag backfill, still running right after a first-time pull.
+  const pending = c.pending
+    ? `<div class="note" style="margin-bottom:16px">Still pulling ${esc(other)}'s history in the background. Artists match now; genres and the score fill in shortly, so compare again in a moment for the full picture.</div>`
+    : '';
   const crow = (k, v) => `<div class="crow"><span>${k}</span><span class="v">${esc(v)}</span></div>`;
   const artists = (c.shared_artists || []).slice(0, 10).map(a => crow(artistBtn(a.artist_name), `${a.a_plays} / ${a.b_plays}`)).join('') || emptyMsg('no shared artists');
   const shared = (c.shared_tags || []).slice(0, 8).map(t => crow(genreBtn(t.tag), `${t.a_pct}% / ${t.b_pct}%`)).join('') || emptyMsg('none');
   const diverge = (c.divergent_tags || []).slice(0, 8).map(t => crow(genreBtn(t.tag), `${t.a_pct}% / ${t.b_pct}%`)).join('') || emptyMsg('none');
-  $('compat').innerHTML = `<div class="bignum">${c.score}%</div>
+  $('compat').innerHTML = `${pending}<div class="bignum">${c.score}%</div>
     <div class="sub" style="margin:8px 0 24px">taste match · counts and genre shares shown as you / ${esc(other)}</div>
     <div class="cols2">
       <section class="block"><div class="head"><h3 style="font-size:17px">Shared artists</h3></div>${artists}</section>

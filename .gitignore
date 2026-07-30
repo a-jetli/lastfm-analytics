@@ -2,6 +2,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+.pytest_cache/
 .venv/
 venv/
 .claude
@@ -13,3 +14,5 @@ dev/
 
 # Personal notes and study docs (TODO, design defenses, learning plans).
 notes/
+resume_bullet.md
+implementation_quiz.md

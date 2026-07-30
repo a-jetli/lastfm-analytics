@@ -2,9 +2,11 @@
 numpy, no DB (reads/caching live in sync_service + queries/recommend.py).
 
 The idea: each artist is a vector over genre tags, a user's taste is the sum
-of their played artists' vectors, and unplayed artists are ranked by cosine
-similarity (direction of taste, not volume). TF-IDF discounts tags that are on
-every artist so distinctive matches ("shoegaze") outweigh generic ones ("rock").
+of their played artists' vectors (each artist weighted by how much AND how
+recently they've been played -- see get_user_plays), and unplayed artists are
+ranked by cosine similarity (direction of taste, not volume). TF-IDF discounts
+tags that are on every artist so distinctive matches ("shoegaze") outweigh
+generic ones ("rock").
 """
 
 import math
@@ -41,17 +43,22 @@ def build_artist_vectors(
 
 
 def build_user_vector(
-    plays: dict[str, int], artist_vectors: dict[str, dict[str, float]]
+    plays: dict[str, float], artist_vectors: dict[str, dict[str, float]]
 ) -> dict[str, float]:
     """Sum a user's played artists into one taste vector, each scaled by
-    log(1 + plays) so a few obsessions don't drown out the rest. Artists we
-    have no vector for are skipped."""
+    log(1 + play_score) so a few obsessions don't drown out the rest. Artists we
+    have no vector for are skipped.
+
+    `play_score` is per artist. It's a raw count in the unit tests, but in
+    production it's the RECENCY-WEIGHTED score from get_user_plays (recent
+    listening weighted up), so the vector reflects current taste. The log
+    compression works the same on either -- it just tempers heavy values."""
     taste: dict[str, float] = defaultdict(float)
-    for artist, count in plays.items():
+    for artist, play_score in plays.items():
         vec = artist_vectors.get(artist)
         if not vec:
             continue
-        weight = math.log(1 + count)
+        weight = math.log(1 + play_score)
         for tag, value in vec.items():
             taste[tag] += weight * value
     return dict(taste)
@@ -62,7 +69,11 @@ def cosine(a: dict[str, float], b: dict[str, float]) -> float:
     if either vector is empty or zero-length."""
     if not a or not b:
         return 0.0
-    dot = sum(a[tag] * b[tag] for tag in a.keys() & b.keys())
+    # dot product = sum of a[tag]*b[tag] over the tags both vectors have
+    dot = 0.0
+    for tag in a:
+        if tag in b:
+            dot += a[tag] * b[tag]
     norm_a = math.sqrt(sum(v * v for v in a.values()))
     norm_b = math.sqrt(sum(v * v for v in b.values()))
     if norm_a == 0 or norm_b == 0:

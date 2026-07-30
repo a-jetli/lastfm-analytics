@@ -12,16 +12,33 @@ def get_tag_corpus(cur):
     return cur.fetchall()
 
 
+# Recency half-life for the taste vector, in days. A play this old counts half
+# as much toward "what you're into now" as a play today; twice this old, a
+# quarter; and so on (exponential decay). 90 days keeps a season of listening
+# dominant without erasing older favorites. Tuning knob, not a hard rule.
+TASTE_HALF_LIFE_DAYS = 90
+
+
 def get_user_plays(cur, user_id: int):
-    """(artist_name, plays) for one user -- how many times they've played each
-    artist. Drives both the taste vector (log-weighted) and the exclusion set
-    (we never recommend an artist the user already plays)."""
+    """(artist_name, recency_weight) for one user: every artist they've played,
+    each with a recency-weighted play score instead of a raw count. A play
+    contributes 0.5 ** (age_days / TASTE_HALF_LIFE_DAYS), so recent listening
+    dominates the taste vector while old plays fade but never vanish.
+
+    Drives two things, which is why EVERY played artist must stay in the result:
+    the taste vector (this weight, then log-compressed in build_user_vector) and
+    the exclusion set (we never recommend an artist the user already plays -- an
+    artist they loved a year ago still counts as 'played' and stays excluded).
+    Decay never reaches zero, so the row is always present.
+    """
     cur.execute(
         """
-        SELECT artist_name, COUNT(*) AS plays
+        SELECT artist_name,
+               SUM(power(0.5, EXTRACT(EPOCH FROM (now() - listened_at))
+                              / (86400.0 * %s))) AS recency_weight
         FROM scrobbles WHERE user_id = %s GROUP BY artist_name
         """,
-        (user_id,),
+        (TASTE_HALF_LIFE_DAYS, user_id),
     )
     return cur.fetchall()
 

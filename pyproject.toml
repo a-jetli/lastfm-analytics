@@ -3,3 +3,17 @@
 # `app` lives; without this, `from app import ...` only works if PYTHONPATH is
 # set by hand (which is how it silently worked in every local run so far).
 pythonpath = ["."]
+
+# --strict-markers makes an unregistered @pytest.mark.foo an error instead of a
+# warning, so the markers list below is the whole set and can be trusted.
+# Known gap it does NOT cover: pytest never validates the -m EXPRESSION, so a
+# typo like `pytest -m "not bd"` matches nothing, deselects nothing and quietly
+# runs everything. Check the "deselected" count in the summary line.
+addopts = "--strict-markers"
+
+markers = [
+    # Applied automatically in tests/conftest.py to anything that reaches the
+    # db_url fixture, so it never falls out of date. `pytest -m "not db"` is the
+    # supported way to run without a Postgres.
+    "db: needs a live Postgres server",
+]

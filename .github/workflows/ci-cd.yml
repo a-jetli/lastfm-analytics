@@ -1,0 +1,140 @@
+# ==============================================================================
+#  CI + CD for lastfm-analytics
+# ==============================================================================
+#
+#  Two jobs, one file:
+#
+#    test    (CI)  run the suite on every push and pull request
+#    deploy  (CD)  ship main to the EC2 box, ONLY if test passed
+#
+#  Both live here rather than in ci.yml + cd.yml because `needs:` only works
+#  between jobs in the same workflow. That dependency is the entire point: it is
+#  what makes this a pipeline instead of two automations that happen to run near
+#  each other. Splitting the files would mean wiring them back together with
+#  `workflow_run`, which is more machinery and one more way to get it wrong.
+#
+#  Terminology, since "CD" is used for two different things: this is continuous
+#  DEPLOYMENT (green commit goes live unattended). Continuous DELIVERY is the
+#  variant where a human clicks release. To switch, replace the `push` condition
+#  on the deploy job with `workflow_dispatch`.
+#
+#  Design notes for both halves are in notes/CD_PLAN.md.
+#
+name: ci-cd
+on: [push, pull_request]
+
+jobs:
+  # ============================================================================
+  #  CI
+  # ============================================================================
+  #  Most of the suite is SQL tested against a real Postgres: the query layer is
+  #  800 lines of it, and window functions, AT TIME ZONE and mode() WITHIN GROUP
+  #  have no stand-in. So a service container runs beside the job.
+  #
+  #  There is deliberately no skip-if-missing behaviour. If the container fails
+  #  to start, the DB tests fail. A green check on a run that never touched the
+  #  SQL would be worse than a red one.
+  # ============================================================================
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Same major version as docker-compose.yml and the deployed box, so the
+        # tests can't pass here against SQL the production server would reject.
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Without this the job can start connecting before Postgres is up.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # httpx is test-only (FastAPI's TestClient runs on it) and stays out of
+      # requirements.txt so it cannot end up in the runtime image. Both pinned for
+      # the same reason the app's deps are: an upstream release should never be
+      # able to turn this red with no commit behind it.
+      - name: Install
+        run: pip install -r requirements.txt pytest==9.1.1 httpx==0.28.1
+
+      - name: Test
+        # TEST_ADMIN_URL overrides the libpq defaults the tests use locally and
+        # points them at the service container above. The suite creates and drops
+        # its own lastfm_test database off it.
+        run: pytest -q
+        env:
+          TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+  # ============================================================================
+  #  CD
+  # ============================================================================
+  #  Rudimentary on purpose: ssh in and run the three commands you would type by
+  #  hand. No third-party actions, nothing here that isn't already true of the
+  #  manual deploy, so the fallback when this breaks is obvious.
+  #
+  #  Currently INERT. It needs the repo variable DEPLOY_ENABLED=true, which does
+  #  not exist yet, so today CI runs and this is skipped. One-time server setup
+  #  and the full secret list are in notes/CD_PLAN.md.
+  # ============================================================================
+  deploy:
+    needs: test # THE line. No green tests, no deploy.
+    runs-on: ubuntu-latest
+    # Three guards: pushes only (a pull request must never deploy), main only,
+    # and the kill switch so this stays dormant until the box exists.
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && vars.DEPLOY_ENABLED == 'true'
+
+    steps:
+      - name: Load the SSH key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # Written to a file, not passed as an argument: command lines are
+          # visible in the process list on the runner.
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          # Trust the host key on first sight. Genuine trust-on-first-use: this
+          # protects against a man-in-the-middle appearing LATER, not one present
+          # right now. Fine for a box you own. The stricter version keeps the
+          # known host key in a secret too.
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Pull and restart on the box
+        # --build means the image is built ON the instance. On a 1 GB t3.micro
+        # that also runs Postgres that is slow but works. It is the first thing to
+        # change if the box struggles: build here, push to a registry, have the
+        # box only pull. See notes/CD_PLAN.md, Tier 2.
+        run: |
+          ssh -i ~/.ssh/deploy "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            'set -e
+             cd ~/lastfm-analytics
+             git pull --ff-only
+             docker compose up -d --build --remove-orphans
+             # Dangling layers only, never -a: the previous tagged image is the
+             # rollback, and the free tier ships an 8 GB disk old layers fill.
+             docker image prune -f'
+
+      - name: Smoke test
+        # A deploy that reports success while the app 500s is worse than one that
+        # fails, because nothing tells you. curl -f turns a bad status into a
+        # failed job. Retried because uvicorn takes a moment to bind.
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 5 "http://${{ secrets.EC2_HOST }}:8000/health"; then
+              echo "healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "app did not come back healthy after the deploy"; exit 1
