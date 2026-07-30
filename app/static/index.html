@@ -133,6 +133,23 @@
   .hm-cell[data-lvl="3"] { background: color-mix(in srgb, var(--accent) 72%, transparent); }
   .hm-cell[data-lvl="4"] { background: var(--accent); }
   .hm-cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  /* Genre clock: same grid mechanics, --accent-2 so it reads as the genre
+     colour (matching the meters under Genres) and never as a second play count. */
+  .gm { display: grid; grid-template-columns: 58px repeat(7, 1fr); gap: 3px; align-items: stretch; }
+  .gm .lbl { font-size: 11px; color: var(--muted); align-self: center; }
+  .gm .hd { font-size: 11px; color: var(--muted); text-align: center; padding-bottom: 2px; }
+  .gm-cell { border: 0; border-radius: 3px; padding: 6px 4px; min-height: 46px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 11px; line-height: 1.25; color: var(--ink); overflow: hidden;
+    background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
+  .gm-cell[data-lvl="1"] { background: color-mix(in srgb, var(--accent-2) 28%, transparent); }
+  .gm-cell[data-lvl="2"] { background: color-mix(in srgb, var(--accent-2) 52%, transparent); }
+  .gm-cell[data-lvl="3"] { background: color-mix(in srgb, var(--accent-2) 76%, transparent); }
+  .gm-cell[data-lvl="4"] { background: var(--accent-2); color: var(--on-accent); }
+  .gm-cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .gm-cell[data-lvl="0"] { cursor: default; color: var(--muted); }
+  .gm-cell[data-lvl="0"]:hover { outline: 0; }
+  @media (max-width: 620px) { .gm-cell { font-size: 10px; min-height: 40px; } .gm { grid-template-columns: 40px repeat(7, 1fr); } }
   .hm-cell[data-lvl="0"] { cursor: default; }
   .hm-cell[data-lvl="0"]:hover { outline: 0; }
   /* Custom heatmap tooltip: native title= waits ~1s before showing; this
@@ -305,7 +322,13 @@
       <section class="block">
         <div class="head"><h3>Listening clock</h3><span class="cap" id="clock-cap">by day &amp; part of day</span></div>
         <div class="clock" id="clock"></div>
-        <div class="sub" style="margin-top:10px">Each column is a day. Click any block to see those plays in Scrobbles.</div>
+        <div class="sub" style="margin-top:10px">A heatmap of your recent listening history. Each column is a day. Click any block to see those plays in Scrobbles.</div>
+      </section>
+      <section class="block">
+        <div class="head"><h3>Genre routine</h3><span class="cap">what a typical week sounds like</span></div>
+        <div id="genre-clock"></div>
+        <div class="sub" style="margin-top:10px">Click any block to see those plays in Scrobbles.</div>
+        <div class="note">Your most listened to genre tags by day and time, covering all history. Tags are user defined but filtered for relevance.</div>
       </section>
     </section>
 
@@ -342,7 +365,7 @@
         <div class="head"><h3>Heavy rotation</h3><span class="cap">artists with 5+ plays</span>
           <div class="ranges" data-ranges="loyalty"></div></div>
         <div class="ranked" id="loyalty"></div>
-        <div class="note">How often you come back to an artist inside the range above: the share of days between your first play of them and your last play of anything that you actually listened to them. Full bar = they stayed in rotation the whole time. Short bar = a couple of sessions, then nothing. Only artists with at least five plays in the range appear.</div>
+        <div class="note">How often you come back to an artist inside the range above. Full bar = in rotation throughout. Short bar = a couple of sessions, then nothing. Needs five plays to appear.</div>
       </section>
     </section>
 
@@ -468,7 +491,7 @@ function switchTab(name) {
 }
 $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) switchTab(b.dataset.tab); });
 
-const PANELS = ['report','streaks','discovery','clock','hours','tag-shift',
+const PANELS = ['report','streaks','discovery','clock','genre-clock','hours','tag-shift',
                 'loyalty','summary','binges','song-binges','recommendations'];
 // tz on EVERY panel: anything bucketing by day/week/month needs the listener's
 // zone, or a 9pm play lands on tomorrow. Panels that don't bucket ignore it.
@@ -660,6 +683,7 @@ function render(d) {
   barChart('bars', 'bar-labels', report.slice(-12), m => m.plays);
   barChart('hbars', 'hbar-labels', hours.slice(-12), m => Number(m.hours || 0));
   drawClock(clock);
+  drawGenreClock(d['genre-clock'] || []);
 
   renderGenres(tagShift);
 
@@ -800,6 +824,60 @@ function drawClock(rows) {
   if (!center) { const sc = $('clock').querySelector('.hm-scroll'); if (sc) sc.scrollLeft = sc.scrollWidth; }
 }
 
+// Genre routine: the aggregate weekday x part grid, one cell per slot, showing
+// the genre that slot is most made of. Sibling to the listening clock above it,
+// deliberately a different question: the clock is one column per REAL date and
+// answers "what did I do on the 14th", this collapses every Friday evening you
+// have ever had into one square and answers "what is a Friday evening for me".
+// Same buckets either way, so the two line up conceptually.
+function drawGenreClock(rows) {
+  const box = $('genre-clock');
+  if (!rows.length) { box.innerHTML = emptyMsg('no genre data yet'); return; }
+
+  // rows are (weekday, part, tag, plays), already ordered plays DESC within a
+  // cell, so the first tag seen for a cell is its dominant one.
+  const cells = {};
+  let cmax = 1;
+  rows.forEach(r => {
+    const k = r.weekday + '|' + r.part;
+    const c = cells[k] || (cells[k] = { total: 0, tags: [] });
+    c.total += r.plays;
+    if (c.tags.length < 3) c.tags.push(`${r.tag} ${r.plays}`);
+    if (!c.top || r.plays > c.top.plays) c.top = r;
+    cmax = Math.max(cmax, c.total);
+  });
+
+  const head = ['<span></span>', ...WEEKDAY.map(d => `<span class="hd">${d}</span>`)].join('');
+  const body = PARTS.map((part, pi) => {
+    const label = `<span class="lbl" title="${PART_HOURS[pi]}">${part}</span>`;
+    const row = WEEKDAY.map((dayName, wd) => {
+      const c = cells[wd + '|' + pi];
+      if (!c) return `<button class="gm-cell" type="button" data-lvl="0" disabled></button>`;
+      // "tagged" on purpose: this grid inner-joins to primary_tag, so an
+      // untagged artist's plays are absent here but WILL show in the rows a
+      // click lands on. ~1% of plays, but the label shouldn't overstate.
+      const tip = `${dayName} · ${part} (${PART_HOURS[pi]}) · ${c.total} tagged play${c.total === 1 ? '' : 's'} · ${c.tags.join(', ')}`;
+      return `<button class="gm-cell" type="button" data-lvl="${heatLevel(c.total, cmax)}"
+        data-day="${dayName}" data-part="${part}" data-tip="${esc(tip)}">${esc(c.top.tag)}</button>`;
+    }).join('');
+    return label + row;
+  }).join('');
+  box.innerHTML = `<div class="gm">${head}${body}</div>`;
+}
+
+// Same jump-to-Scrobbles behaviour as the listening clock, but filtered by
+// WEEKDAY rather than a date: day: and part: are existing search terms, so the
+// rows you land on are exactly the ones the cell counted.
+$('genre-clock').addEventListener('click', e => {
+  const cell = e.target.closest('.gm-cell[data-day]');
+  if (!cell || cell.dataset.lvl === '0') return;
+  const query = `day:${cell.dataset.day} part:${cell.dataset.part}`;
+  Object.assign(hist, { search: query, start: null, end: null, offset: 0 });
+  $('scrob-search').value = query;
+  switchTab('scrobbles'); updateScrobFilter(); loadScrobbles();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
 // Rescale the heatmap on resize (debounced) so cells keep filling the width.
 let clockResize = null;
 window.addEventListener('resize', () => {
@@ -813,8 +891,9 @@ window.addEventListener('resize', () => {
 const hmTip = document.createElement('div');
 hmTip.className = 'hm-tip';
 document.body.appendChild(hmTip);
-$('clock').addEventListener('mouseover', e => {
-  const cell = e.target.closest('.hm-cell[data-tip]');
+const TIP_CELL = '.hm-cell[data-tip], .gm-cell[data-tip]';  // both heatmaps
+document.body.addEventListener('mouseover', e => {
+  const cell = e.target.closest(TIP_CELL);
   if (!cell) return;
   const r = cell.getBoundingClientRect();
   hmTip.textContent = cell.dataset.tip;
@@ -822,8 +901,8 @@ $('clock').addEventListener('mouseover', e => {
   hmTip.style.top = r.top + 'px';
   hmTip.classList.add('on');
 });
-$('clock').addEventListener('mouseout', e => {
-  if (e.target.closest('.hm-cell')) hmTip.classList.remove('on');
+document.body.addEventListener('mouseout', e => {
+  if (e.target.closest(TIP_CELL)) hmTip.classList.remove('on');
 });
 // The strip scrolls, so hide the tip on scroll rather than let it drift.
 $('clock').addEventListener('scroll', () => hmTip.classList.remove('on'), true);
