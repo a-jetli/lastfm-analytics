@@ -65,11 +65,9 @@ def _is_stale(last_synced_at) -> bool:
 
 
 def is_syncing(user_id: int) -> bool:
-    """True if a sync thread for this user is running IN THIS PROCESS. Used by
-    the status endpoint to tell the frontend "still pulling". Cross-process syncs
-    (the scheduler in another worker) aren't visible here -- same limitation as
-    the _active map itself, which is why the advisory lock exists as the real
-    guard. Single-process deploy, so this is accurate in practice."""
+    """True if a sync thread for this user is running IN THIS PROCESS. Blind to
+    other processes -- the advisory lock is the real guard. Accurate on a
+    single-process deploy, which is what we run."""
     with _active_lock:
         thread = _active.get(user_id)
         return bool(thread and thread.is_alive())
@@ -77,20 +75,13 @@ def is_syncing(user_id: int) -> bool:
 
 def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = False,
                  wait: bool = True) -> None:
-    """Kick a sync if the user's data is new, stale, or `force` is set, then block
-    up to WAIT_BUDGET_SECONDS for it to make progress. Returns immediately if data
-    is already fresh (and not forced) or a sync is already running (we just wait on
-    that one). `force=True` is for an explicit user action (pressing Load): it
-    means "refresh me now" and bypasses the once-a-day staleness threshold. The
-    sync is still incremental, so it only pulls plays since the last high-water
-    mark -- cheap even when forced.
+    """Kick a sync if the data is new, stale or `force`, then block up to
+    WAIT_BUDGET_SECONDS. `force` is an explicit Load press; the sync stays
+    incremental so it is cheap anyway.
 
-    `wait=False` kicks the sync but never blocks. Analytics reads use it: the
-    wait budget is meant to be paid ONCE, on the explicit join (POST /sync), so
-    the first paint has data. Paying it again on every read multiplied the
-    loading screen by the number of panels the page fetches -- the reads now
-    return whatever is committed so far and the frontend reports progress from
-    /sync/{user}/status instead."""
+    `wait=False` never blocks, which is what analytics reads use: the budget is
+    paid ONCE on the join, or a page fetching a dozen panels pays it a dozen
+    times and the loading screen becomes half a minute."""
     with _active_lock:
         thread = _active.get(user_id)
         if thread and thread.is_alive():
@@ -115,15 +106,12 @@ def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = Fals
 
 
 def join(username: str, force: bool = False, wait: bool = True) -> tuple[int, bool]:
-    """Resolve `username` to a user id, creating and kicking a sync on first
-    sight. Returns (user_id, is_new).
+    """Resolve `username` to a user id, creating and syncing on first sight.
+    Returns (user_id, is_new).
 
-    A brand-new handle is validated against Last.fm BEFORE its row is created, so
-    a typo can't leave a phantom user or a dashboard that loads forever. Raises
-    lastfm.LastfmUserNotFound for an unknown handle; a transient Last.fm outage
-    during that check is swallowed (we let them in and the background sync
-    retries, rather than blocking a join on a blip). Used by the join endpoint
-    and by compare, which must be able to pull in a second user on demand.
+    A new handle is validated against Last.fm BEFORE its row is created, so a
+    typo leaves no phantom user. A transient outage during that check is
+    swallowed rather than blocking the join on a blip.
     """
     with db.get_connection() as conn, conn.cursor() as cur:
         row = sync_queries.get_user(cur, username)
@@ -239,25 +227,16 @@ def _scheduler_loop() -> None:
 
 
 def _overnight_pass() -> None:
-    """One consolidated maintenance pass, run on each scheduler tick.
+    """One maintenance pass per scheduler tick.
 
-    All background reference-data work funnels through here, in order:
-      1. _sync_all_stale     -- pull new scrobbles for users over a day old.
-      2. _backfill_durations -- look up track lengths we don't have yet.
-      3. _backfill_artist_tags -- look up genre tags for artists we don't have.
-      4. _refresh_recommendations -- rebuild each user's cached artist recs.
-      5. _backfill_top_tracks -- fetch top tracks for favorite/recommended
-         artists (after step 4 so newly recommended artists get songs too).
-    Sync runs first so any brand-new tracks/artists are in scrobbles before the
-    enrichment steps go looking for them; recommendations run after so they
-    score against the freshest scrobbles and tags.
+    Order matters: sync first so new tracks/artists exist before the enrichment
+    steps look for them, recommendations after the tags they score against, and
+    top tracks last so newly recommended artists get songs too.
 
-    This IS the "passively keep every non-user table growing" job. Every step is
-    incremental (work list = rows in scrobbles not yet enriched) and global (one
-    lookup per artist/track, shared across all users), so the corpus expands on
-    its own as users join and listen, without ever re-fetching what we have. The
-    only source of new artists is what users actually play -- no crawler -- which
-    keeps stored Last.fm data far under the ToS 100MB cap by construction.
+    Every step is incremental (work list = rows not yet enriched) and global (one
+    lookup per artist/track, shared across users), so the corpus grows on its own
+    from what users actually play. No crawler, which is what keeps stored Last.fm
+    data under the ToS 100MB cap by construction.
     """
     _sync_all_stale()
     _backfill_durations()
@@ -267,12 +246,9 @@ def _overnight_pass() -> None:
 
 
 def _backfill_durations(user_id: int | None = None) -> None:
-    """Fetch durations for scrobbled tracks not yet in track_durations.
-
-    Commits per row so an interrupted pass keeps its progress; 0 ms results
-    are stored so we don't re-ask. Pass user_id to fill one user's tracks
-    right after their sync; omit for the global overnight sweep.
-    """
+    """Durations for tracks not yet in track_durations. Commits per row so an
+    interrupted pass keeps progress; 0 ms is stored so we don't re-ask. Pass
+    user_id right after a sync, omit for the overnight sweep."""
     with db.get_connection() as conn, conn.cursor() as cur:
         pairs = sync_queries.get_tracks_missing_durations(cur, user_id)
         for artist_name, track_name in pairs:

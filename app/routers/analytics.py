@@ -16,13 +16,10 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 def _prepare(username: str) -> int:
-    """Resolve username -> id (404 if unknown) and kick a refresh if data is stale.
+    """Resolve username -> id (404 if unknown) and kick a refresh if stale.
 
-    Never blocks: wait=False. A page load fans out to a dozen of these endpoints,
-    so blocking here would charge the sync wait budget once PER PANEL (and the
-    browser's ~6-connection cap turns that into serial waves). The explicit join
-    -- POST /sync -- pays the wait once; these reads return what is committed so
-    far and the page polls /sync/{user}/status to show progress.
+    Never blocks. A page load fans out to a dozen of these, so blocking would
+    charge the wait budget once PER PANEL. POST /sync pays it once instead.
     """
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         row = q.get_user(cur, username)
@@ -35,19 +32,16 @@ def _prepare(username: str) -> int:
 
 
 def _days(days: int) -> int | None:
-    """Range-picker window in days -> what the query layer wants. 0, absent or
-    negative all mean "all time" (None). Capped at 5 years so a hand-typed
-    ?days=99999999 can't turn into an interval Postgres rejects."""
+    """Range-picker days -> query layer. 0/absent/negative mean all time. Capped
+    at 5 years so a hand-typed ?days=99999999 can't make Postgres reject the
+    interval."""
     return min(days, 1826) if days and days > 0 else None
 
 
 def _tz(name: str) -> str:
-    """Validate an IANA timezone name from the browser, falling back to UTC.
-
-    It reaches SQL as a bound parameter, so this isn't about injection -- it's
-    that Postgres raises on an unknown zone, which would turn a junk ?tz= into
-    a 500. zoneinfo is the same tz database Postgres reads, so agreement is free.
-    """
+    """Validate an IANA zone from the browser, falling back to UTC. Not about
+    injection (it is a bound param) -- Postgres raises on an unknown zone, which
+    would turn a junk ?tz= into a 500."""
     try:
         ZoneInfo(name)
         return name
@@ -60,8 +54,7 @@ def _tz(name: str) -> str:
 
 @router.get("/{username}/streaks")
 def streaks(username: str, tz: str = "UTC"):
-    # Longest consecutive-day listening runs. ?tz= because a "day" has to be the
-    # listener's day, or UTC bucketing reports streaks that never happened.
+    # ?tz= because a "day" must be the listener's, or UTC bucketing invents streaks.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         return q.get_streaks(cur, user_id, _tz(tz))
@@ -86,10 +79,8 @@ def loyalty(username: str, tz: str = "UTC", days: int = 0):
 
 @router.get("/{username}/clock")
 def clock(username: str, tz: str = "UTC", days: int = 365):
-    # Per-day listening heatmap (a contributions graph): one column per real
-    # date over the last ?days=, each split into 4 parts of day. ?tz= is the
-    # browser's IANA zone so a play lands on the listener's calendar day and
-    # part; the same tz + a date:/part: search reproduce a clicked cell exactly.
+    # Contributions-graph heatmap: one column per real date over the last ?days=,
+    # split into 4 parts. The same tz + a date:/part: search reproduce a cell exactly.
     user_id = _prepare(username)
     days = max(1, min(days, 366))
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -98,9 +89,8 @@ def clock(username: str, tz: str = "UTC", days: int = 365):
 
 @router.get("/{username}/genre-clock")
 def genre_clock(username: str, tz: str = "UTC"):
-    # Genre heatmap: plays per {weekday, part, tag}. Raw numbers for the frontend
-    # to color/stack. weekday 0=Sunday, part 0-3; ?tz= as on /clock, and the same
-    # buckets, so this overlays the listening clock cell for cell.
+    # Genre heatmap: plays per {weekday, part, tag}, same buckets as /clock so it
+    # overlays cell for cell. Nothing renders it yet.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         return q.get_genre_clock(cur, user_id, _tz(tz))
@@ -203,13 +193,9 @@ def artist_detail(username: str, name: str):
 def scrobbles(username: str, search: str = "", limit: int = 50, offset: int = 0,
               sort: str = "listened_at", dir: str = "desc",
               start: str = "", end: str = "", tz: str = "UTC"):
-    # Browsable, sortable play history. ?search= takes field terms
-    # (artist:/track:/album:/year:/month:) and bare text, which still matches
-    # artist OR track; ?start=&end= restrict to a date range (a clicked week
-    # drills in here); ?sort=&dir= order the whole filtered history (whitelisted
-    # in get_scrobbles); ?limit=&offset= paginate, limit clamped.
-    # Returns {total, limit, offset, rows}: `total` counts every match, not just
-    # this page, so the table can show "1-50 of 1,204" and disable Next exactly.
+    # Browsable, sortable play history. ?search= takes field terms plus bare text;
+    # ?start=&end= is the week drill-down; ?sort=&dir= are whitelisted downstream.
+    # `total` counts every match, not just this page, so Next disables exactly.
     user_id = _prepare(username)
     limit = max(1, min(limit, 200))
     offset = max(0, offset)

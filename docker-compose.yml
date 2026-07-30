@@ -12,17 +12,15 @@ services:
       - pgdata:/var/lib/postgresql
       # The official image runs this against the fresh DB on FIRST boot only.
       - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
-    # -h 127.0.0.1 forces TCP on purpose. During first boot the entrypoint runs
-    # schema.sql against a temporary server bound to the unix socket only, so a
-    # socket-based pg_isready reports "ready" while the schema is still loading.
-    # Over TCP the check stays red until the real server is up and initdb done.
+    # -h 127.0.0.1 forces TCP on purpose: during first boot the entrypoint runs
+    # schema.sql against a socket-only temp server, so a socket check reports
+    # ready while the schema is still loading.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d lastfm"]
       interval: 5s
       timeout: 3s
       retries: 12
-    # Survive a host reboot; "unless-stopped" so a deliberate `compose stop`
-    # stays stopped.
+    # Survive a reboot; a deliberate `compose stop` still stays stopped.
     restart: unless-stopped
 
   app:
@@ -34,15 +32,14 @@ services:
       # reach each other by service name, never "localhost".
       DATABASE_URL: postgresql://postgres:postgres@db:5432/lastfm
       LASTFM_API_KEY: ${LASTFM_API_KEY}
-    # Wait for "db ready", not just "db started". The app opens connections per
-    # request rather than at boot, so this isn't needed to avoid a crash loop --
-    # it's so the first request against a cold stack can't land mid-initdb.
+    # "db ready", not "db started": not to avoid a crash loop (connections are
+    # per request) but so a first request can't land mid-initdb.
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      # Liveness only: /health deliberately does not touch Postgres, so a DB
-      # blip can't make an otherwise-fine app look dead.
+      # Liveness only: /health never touches Postgres, so a DB blip can't make
+      # a fine app look dead.
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
       interval: 15s
       timeout: 5s

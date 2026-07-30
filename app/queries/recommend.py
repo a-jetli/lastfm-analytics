@@ -5,17 +5,12 @@ and cache the computed results. The vector math itself is in app/recommender.py
 
 
 def get_tag_corpus(cur):
-    """Every (artist, tag, weight) from the cleaned tag view -- the raw material
-    for artist vectors. Returned flat; the caller folds it into {artist: {tag:
-    weight}}. Reads artist_tags_clean, so blocklist/alias/exclusion rules apply.
+    """Flat (artist, tag, weight) rows for the artist vectors; the caller folds
+    them into {artist: {tag: weight}}.
 
-    Folded on lower(artist_name), because Last.fm scrobbles the same artist under
-    several spellings and each one gets its own tag rows. Left split, an artist
-    ends up with two vectors, so BOTH can win a slot and the same act is
-    recommended twice under different casing (seen live: "Tyler, the Creator"
-    and "Tyler, The Creator" in one list). One canonical spelling per artist,
-    chosen by mode() the way get_loyalty does, and the strongest weight wins per
-    tag.
+    Folded on lower(artist_name): split by casing an artist gets two vectors and
+    can win two slots, which put "Tyler, the Creator" and "Tyler, The Creator" in
+    one list.
     """
     cur.execute(
         """
@@ -34,30 +29,18 @@ def get_tag_corpus(cur):
     return cur.fetchall()
 
 
-# Recency half-life for the taste vector, in days. A play this old counts half
-# as much toward "what you're into now" as a play today; twice this old, a
-# quarter; and so on (exponential decay). 90 days keeps a season of listening
-# dominant without erasing older favorites. Tuning knob, not a hard rule.
+# Taste-vector recency half-life in days: a play this old counts half as much as
+# one today. Keeps a season dominant without erasing older favourites. A knob.
 TASTE_HALF_LIFE_DAYS = 90
 
 
 def get_user_plays(cur, user_id: int):
-    """(artist_name, recency_weight) for one user: every artist they've played,
-    each with a recency-weighted play score instead of a raw count. A play
-    contributes 0.5 ** (age_days / TASTE_HALF_LIFE_DAYS), so recent listening
-    dominates the taste vector while old plays fade but never vanish.
+    """(artist_name, recency_weight) per artist: 0.5 ** (age_days / half-life)
+    summed over their plays.
 
-    Drives two things, which is why EVERY played artist must stay in the result:
-    the taste vector (this weight, then log-compressed in build_user_vector) and
-    the exclusion set (we never recommend an artist the user already plays -- an
-    artist they loved a year ago still counts as 'played' and stays excluded).
-    Decay never reaches zero, so the row is always present.
-
-    Grouped case-insensitively, like the tag corpus. Split by casing, a user's
-    22 plays of "Charli xcx" did not exclude the corpus entry "Charli XCX", and
-    the recommender cheerfully suggested an artist they already listen to. The
-    exclusion match in recommender.recommend is case-insensitive too, so the two
-    sides cannot drift apart again.
+    EVERY played artist must appear -- this is also the exclusion set, so decay
+    must never reach zero. Grouped on lower(artist_name) like the tag corpus:
+    split by casing, 22 plays of "Charli xcx" failed to exclude "Charli XCX".
     """
     cur.execute(
         """

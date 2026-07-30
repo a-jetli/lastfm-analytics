@@ -88,8 +88,7 @@
   section.block > .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; }
   .head h3 { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: -.2px; }
   .head .cap { color: var(--muted); font-size: 13px; }
-  /* Range picker, top right of a section head. margin-left:auto pushes it to the
-     far edge while staying on the title's baseline row. */
+  /* Range picker: margin-left:auto pushes it to the far edge of the head row. */
   .ranges { margin-left: auto; display: flex; gap: 4px; }
   .ranges button { background: none; color: var(--muted); font-size: 12px; cursor: pointer;
     border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; line-height: 1.5; }
@@ -340,10 +339,10 @@
         <div class="note">Genres come from Last.fm's community tags, so they reflect how listeners describe an artist, not an official classification.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>Loyalty</h3><span class="cap">artists with 5+ plays</span>
+        <div class="head"><h3>Heavy rotation</h3><span class="cap">artists with 5+ plays</span>
           <div class="ranges" data-ranges="loyalty"></div></div>
         <div class="ranked" id="loyalty"></div>
-        <div class="note">How often you still come back: the share of days since you first heard an artist that you actually played them. Full bar = in rotation ever since. Short bar = played a lot once, then moved on. Only artists with at least five plays appear.</div>
+        <div class="note">How often you come back to an artist inside the range above: the share of days between your first play of them and your last play of anything that you actually listened to them. Full bar = they stayed in rotation the whole time. Short bar = a couple of sessions, then nothing. Only artists with at least five plays in the range appear.</div>
       </section>
     </section>
 
@@ -471,23 +470,18 @@ $('tabs').addEventListener('click', e => { const b = e.target.closest('button');
 
 const PANELS = ['report','streaks','discovery','clock','hours','tag-shift',
                 'loyalty','summary','binges','song-binges','recommendations'];
-// tz goes on EVERY panel, not just the clock. Any endpoint that buckets by day,
-// week or month needs the listener's zone: on server-time buckets a 9pm play
-// lands on tomorrow, which invents streaks and shifts month boundaries. Panels
-// that don't bucket by date ignore the param.
+// tz on EVERY panel: anything bucketing by day/week/month needs the listener's
+// zone, or a 9pm play lands on tomorrow. Panels that don't bucket ignore it.
 
-// Range picker. Two sections carry one, and the value is a trailing window in
-// days that the backend clamps (0 = all time). Defaults differ on purpose:
-// Genres reads as a portrait of your taste, which wants everything; On repeat
-// reads as "what am I hammering right now", which wants the last week.
+// Range picker: a trailing window in days, clamped server-side (0 = all time).
 const RANGES = [{label: '7d', days: 7}, {label: '30d', days: 30},
                 {label: '6mo', days: 182}, {label: '1y', days: 365},
                 {label: 'All', days: 0}];
-// Each section keeps its OWN selection: they answer different questions, so a
-// shared range would make one of them wrong. Genres is a portrait of taste and
-// wants everything; On repeat is "what am I hammering right now" and wants a
-// week; Loyalty is a long-run return rate and wants everything.
-const range = {genres: 0, binges: 7, loyalty: 0};   // section -> selected days
+// Separate selections on purpose: the sections answer different questions, so
+// one shared range would make one of them wrong.
+// "loyalty" is the internal name everywhere (endpoint, query, render) because
+// the metric IS a loyalty ratio; the panel is only LABELLED "Heavy rotation".
+const range = {genres: 365, binges: 7, loyalty: 7};   // section -> selected days
 // section -> the panels its picker refetches. Genres has no endpoint of its
 // own; it is summed client-side from tag-shift.
 const RANGE_PANELS = {genres: ['tag-shift'], binges: ['binges', 'song-binges'],
@@ -501,8 +495,7 @@ const panelQs = n => {
   return qs;
 };
 
-// Buttons are drawn from RANGES rather than written in the markup, so the two
-// pickers can never drift apart.
+// Drawn from RANGES, not written in the markup, so the pickers can't drift.
 function drawRanges() {
   document.querySelectorAll('.ranges').forEach(box => {
     const section = box.dataset.ranges;
@@ -529,8 +522,7 @@ document.addEventListener('click', async e => {
   else renderBinges(patch['song-binges'] || [], patch.binges || []);
 });
 
-// Both sections render from one place, so the full-dashboard draw and a range
-// change can't produce different markup.
+// One render path per section, so a range change and the full draw agree.
 function renderGenres(tagShift) {
   const gt = {};
   (tagShift || []).forEach(r => gt[r.tag] = (gt[r.tag] || 0) + r.plays);
@@ -543,7 +535,7 @@ function renderGenres(tagShift) {
 function renderLoyalty(loyalty) {
   $('loyalty').innerHTML = (loyalty || []).slice(0, 12).map(a =>
     rankRow(artistBtn(a.artist_name), Number(a.loyalty),
-            `${a.plays} plays · active ${a.active_days} of ${a.days_since_first_play} days since you found them`))
+            `${a.plays} plays · active ${a.active_days} of ${a.days_since_first_play} days`))
     .join('') || emptyMsg('need a few more plays per artist in this range');
 }
 

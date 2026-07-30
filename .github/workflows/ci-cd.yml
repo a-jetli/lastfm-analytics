@@ -1,40 +1,20 @@
-# ==============================================================================
-#  CI + CD for lastfm-analytics
-# ==============================================================================
+# CI + CD. Two jobs, one file:
+#   test    run the suite on every push and pull request
+#   deploy  ship main to the EC2 box, ONLY if test passed
 #
-#  Two jobs, one file:
-#
-#    test    (CI)  run the suite on every push and pull request
-#    deploy  (CD)  ship main to the EC2 box, ONLY if test passed
-#
-#  Both live here rather than in ci.yml + cd.yml because `needs:` only works
-#  between jobs in the same workflow. That dependency is the entire point: it is
-#  what makes this a pipeline instead of two automations that happen to run near
-#  each other. Splitting the files would mean wiring them back together with
-#  `workflow_run`, which is more machinery and one more way to get it wrong.
-#
-#  Terminology, since "CD" is used for two different things: this is continuous
-#  DEPLOYMENT (green commit goes live unattended). Continuous DELIVERY is the
-#  variant where a human clicks release. To switch, replace the `push` condition
-#  on the deploy job with `workflow_dispatch`.
-#
-#  Design notes for both halves are in notes/CD_PLAN.md.
-#
+# One file because `needs:` only works between jobs in the same workflow, and
+# that dependency is what makes this a pipeline rather than two automations.
+# This is continuous DEPLOYMENT (unattended); swap the push condition on deploy
+# for workflow_dispatch to get delivery-with-a-button instead.
+# Design notes: notes/CD_PLAN.md
 name: ci-cd
 on: [push, pull_request]
 
 jobs:
-  # ============================================================================
-  #  CI
-  # ============================================================================
-  #  Most of the suite is SQL tested against a real Postgres: the query layer is
-  #  800 lines of it, and window functions, AT TIME ZONE and mode() WITHIN GROUP
-  #  have no stand-in. So a service container runs beside the job.
-  #
-  #  There is deliberately no skip-if-missing behaviour. If the container fails
-  #  to start, the DB tests fail. A green check on a run that never touched the
-  #  SQL would be worse than a red one.
-  # ============================================================================
+  # ---------------------------------------------------------------- CI ------
+  # Most of the suite is SQL against a real Postgres, so a service container
+  # runs beside the job. No skip-if-missing: if it fails to start, the tests
+  # fail. A green check on a run that never touched the SQL is worse than red.
   test:
     runs-on: ubuntu-latest
 
@@ -61,32 +41,23 @@ jobs:
         with:
           python-version: "3.12"
 
-      # httpx is test-only (FastAPI's TestClient runs on it) and stays out of
-      # requirements.txt so it cannot end up in the runtime image. Both pinned for
-      # the same reason the app's deps are: an upstream release should never be
-      # able to turn this red with no commit behind it.
+      # httpx is test-only (TestClient runs on it) and stays out of
+      # requirements.txt so it can't reach the runtime image. Pinned so an
+      # upstream release can't turn this red with no commit behind it.
       - name: Install
         run: pip install -r requirements.txt pytest==9.1.1 httpx==0.28.1
 
       - name: Test
-        # TEST_ADMIN_URL overrides the libpq defaults the tests use locally and
-        # points them at the service container above. The suite creates and drops
-        # its own lastfm_test database off it.
+        # Points the tests at the service container; they create and drop
+        # their own lastfm_test database off it.
         run: pytest -q
         env:
           TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
-  # ============================================================================
-  #  CD
-  # ============================================================================
-  #  Rudimentary on purpose: ssh in and run the three commands you would type by
-  #  hand. No third-party actions, nothing here that isn't already true of the
-  #  manual deploy, so the fallback when this breaks is obvious.
-  #
-  #  Currently INERT. It needs the repo variable DEPLOY_ENABLED=true, which does
-  #  not exist yet, so today CI runs and this is skipped. One-time server setup
-  #  and the full secret list are in notes/CD_PLAN.md.
-  # ============================================================================
+  # ---------------------------------------------------------------- CD ------
+  # Rudimentary on purpose: ssh in and run the commands you'd type by hand, so
+  # the fallback when this breaks is obvious. INERT until the repo variable
+  # DEPLOY_ENABLED=true exists. Server setup + secrets: notes/CD_PLAN.md
   deploy:
     needs: test # THE line. No green tests, no deploy.
     runs-on: ubuntu-latest
@@ -101,35 +72,29 @@ jobs:
       - name: Load the SSH key
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          # Written to a file, not passed as an argument: command lines are
-          # visible in the process list on the runner.
+          # A file, not an argument: command lines show in the process list.
           printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
-          # Trust the host key on first sight. Genuine trust-on-first-use: this
-          # protects against a man-in-the-middle appearing LATER, not one present
-          # right now. Fine for a box you own. The stricter version keeps the
-          # known host key in a secret too.
+          # Trust on first use: protects against a MITM appearing later, not
+          # one present right now. Fine for a box you own.
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Pull and restart on the box
-        # --build means the image is built ON the instance. On a 1 GB t3.micro
-        # that also runs Postgres that is slow but works. It is the first thing to
-        # change if the box struggles: build here, push to a registry, have the
-        # box only pull. See notes/CD_PLAN.md, Tier 2.
+        # --build means the image is built ON the 1 GB instance, which also
+        # runs Postgres. Slow but works; Tier 2 in CD_PLAN.md moves it here.
         run: |
           ssh -i ~/.ssh/deploy "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
             'set -e
              cd ~/lastfm-analytics
              git pull --ff-only
              docker compose up -d --build --remove-orphans
-             # Dangling layers only, never -a: the previous tagged image is the
-             # rollback, and the free tier ships an 8 GB disk old layers fill.
+             # Dangling only, never -a: the previous tagged image is the
+             # rollback, and the free tier disk is 8 GB.
              docker image prune -f'
 
       - name: Smoke test
-        # A deploy that reports success while the app 500s is worse than one that
-        # fails, because nothing tells you. curl -f turns a bad status into a
-        # failed job. Retried because uvicorn takes a moment to bind.
+        # A deploy that reports success while the app 500s is worse than one
+        # that fails. Retried because uvicorn takes a moment to bind.
         run: |
           for i in 1 2 3 4 5; do
             if curl -fsS --max-time 5 "http://${{ secrets.EC2_HOST }}:8000/health"; then

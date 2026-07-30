@@ -32,14 +32,9 @@ def get_user(cur, username: str):
 def get_streaks(cur, user_id: int, tz: str = "UTC"):
     """Consecutive-day listening runs (gaps-and-islands).
 
-    1. Reduce scrobbles to distinct listening days, in the LISTENER'S zone.
-    2. Number the days in order; day minus row-number is constant while days
-       are consecutive and jumps on a gap -- that constant is the streak id.
-    3. Group by it: MIN/MAX day = start/end, COUNT = length.
-
-    `tz` matters more here than anywhere else: on UTC days a 9pm Monday play and
-    a 9am Wednesday play both fall on Tue/Wed and report a 2-day streak that
-    never happened.
+    Gaps-and-islands: day minus row-number is constant while days are
+    consecutive, so it groups a run. Days are the listener's -- on UTC days a 9pm
+    Monday play and a 9am Wednesday play report a streak that never happened.
     """
     day = _LOCAL_DATE.format(col="listened_at")
     cur.execute(
@@ -70,8 +65,9 @@ def get_discovery(cur, user_id: int, tz: str = "UTC"):
     """New artists per month: count each artist in the month you first heard it.
     Grouped case-insensitively (Last.fm scrobbles the same artist under mixed
     casing, e.g. "Twenty One Pilots" vs "twenty one pilots"), so a lowercase
-    re-scrobble isn't mistaken for a brand-new artist. Months are the listener's,
-    so a late-evening first play doesn't count as next month's discovery."""
+    re-scrobble isn't mistaken for a brand-new artist. `tz` makes the months the
+    listener's, so a late-evening first play doesn't count as next month's
+    discovery."""
     month = _LOCAL_MONTH.format(col="first_play")
     cur.execute(
         f"""
@@ -93,23 +89,14 @@ def get_discovery(cur, user_id: int, tz: str = "UTC"):
 
 
 def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
-    """Steady favorite vs. binge-then-dropped, as a "do you still come back"
-    rate: active_days / days since you first heard them.
+    """active_days / days since you first heard them. Near 1.0 = still in
+    rotation; near 0 = played a lot once, then dropped. Labelled "Heavy rotation"
+    in the UI.
 
-    The denominator runs from the artist's first play to the user's MOST RECENT
-    play overall, not to that artist's own last play. Measuring against their own
-    span made every contiguous run score a perfect 1.0 -- five plays inside one
-    afternoon came out "more loyal" than a favourite spread over a year, which is
-    backwards. Anchoring to the user's latest activity means abandoning an artist
-    keeps pushing their score down, which is what the number is supposed to say.
-
-    So: near 1.0 = in rotation ever since you found them; near 0 = you played
-    them a lot once and moved on.
-
-    With `days` set, everything is measured INSIDE that window: both the artist's
-    first play and the "your most recent play" anchor come from the filtered
-    plays, so the answer reads as "over the last 30 days, how many of them did I
-    play this artist" rather than an all-time score with a truncated numerator.
+    The denominator runs to the user's MOST RECENT play, not the artist's own
+    last play: against their own span every contiguous run scored a perfect 1.0,
+    so a one-afternoon binge outranked a year-long favourite. With `days` set the
+    whole metric, anchor included, is measured inside that window.
     """
     day = _LOCAL_DATE.format(col="listened_at")
     recent, recent_params = _recent(days)
@@ -141,35 +128,23 @@ def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
     return cur.fetchall()
 
 
-# Part of day, defined ONCE. The clock groups by it and the scrobble filter
-# matches on it, so a cell's count always equals the rows clicking it returns --
-# same reason _PRIMARY_TAG_CTE exists. 6-hour blocks: 0=night (00-06),
-# 1=morning (06-12), 2=afternoon (12-18), 3=evening (18-24). The %s is an IANA
-# timezone name; `AT TIME ZONE` converts each timestamptz to local wall-clock
-# time, so Postgres resolves DST per row rather than applying one fixed offset.
+# Defined ONCE: the clock groups by these and the scrobble filter matches on
+# them, so a cell's count always equals the rows clicking it returns.
+# Parts are 6-hour blocks: 0=night, 1=morning, 2=afternoon, 3=evening.
 _PART_OF_DAY = "(EXTRACT(HOUR FROM {col} AT TIME ZONE %s)::int / 6)"
 _WEEKDAY = "EXTRACT(DOW FROM {col} AT TIME ZONE %s)::int"
-# The calendar day a play belongs to IN THE LISTENER'S ZONE. Not the same as
-# listened_at::date, which would cut the day at UTC midnight and push a late
-# evening play onto tomorrow for anyone west of Greenwich.
+# Bare listened_at::date and date_trunc both resolve in the SESSION timezone, so
+# a 9pm play lands on tomorrow and a 9pm 31st play lands in next month. Every
+# date bucket in this file goes through one of these three.
 _LOCAL_DATE = "({col} AT TIME ZONE %s)::date"  # 1 param: tz
-# Same problem one level up: date_trunc on a timestamptz ALSO resolves in the
-# session timezone, so month and week buckets need converting too or a 9pm
-# July 31st play lands in August. Every date bucket in this file goes through
-# one of these three, so there is one day-boundary rule, not two.
 _LOCAL_MONTH = "date_trunc('month', {col} AT TIME ZONE %s)::date"  # 1 param: tz
 _LOCAL_PERIOD = "date_trunc(%s, {col} AT TIME ZONE %s)::date"  # 2 params: bucket, tz
 
 
 def _recent(days: int | None, col: str = "listened_at") -> tuple[str, list]:
-    """SQL fragment + params restricting to the last `days` days, or nothing at
-    all when `days` is falsy. Returns ("", []) for all-time so callers can splice
-    it in unconditionally.
-
-    Powers the range picker on the Genres and On-repeat panels. Deliberately a
-    rolling window from now() rather than calendar periods: "last 30 days" should
-    mean the last 30 days, not "this month so far".
-    """
+    """SQL fragment + params for the range picker, ("", []) when days is falsy so
+    callers can splice it in unconditionally. Rolling window from now(), not
+    calendar periods: "last 30 days" means 30 days, not "this month so far"."""
     if not days:
         return "", []
     return f" AND {col} >= now() - make_interval(days => %s)", [days]
@@ -178,15 +153,10 @@ PART_NAMES = ["night", "morning", "afternoon", "evening"]
 
 
 def get_listening_clock(cur, user_id: int, tz: str = "UTC", days: int = 365):
-    """Plays per (calendar day, part of day) for the last `days` days -- one
-    column per real date, like a contributions graph, NOT a 7-day average.
-
-    An aggregate weekday grid answers "when do I usually listen"; this answers
-    "what did I do on the 14th", which is the one that can be drilled into: a
-    cell maps to exactly one date and one 6-hour block. Rows come back only for
-    (day, part) pairs that have plays; the caller fills the gaps so empty days
-    still occupy a column.
-    """
+    """Plays per (calendar day, part of day) over the last `days` days: one
+    column per real date, like a contributions graph. A cell maps to exactly one
+    date and block, so it can be drilled into. Only non-empty pairs come back;
+    the caller fills the gaps."""
     day = _LOCAL_DATE.format(col="listened_at")
     part = _PART_OF_DAY.format(col="listened_at")
     cur.execute(
@@ -206,13 +176,9 @@ def get_listening_clock(cur, user_id: int, tz: str = "UTC", days: int = 365):
 
 
 def get_genre_clock(cur, user_id: int, tz: str = "UTC"):
-    """Genre heatmap: plays per (weekday, part, primary tag) in the caller's
-    timezone. weekday 0=Sunday, part 0-3 (see PART_NAMES). `tz` is an IANA name
-    from the browser; no stored per-user timezone needed. Unlike
-    get_listening_clock (now one column per real date), this stays an AGGREGATE
-    weekday grid -- "which genres fill a typical Friday night" is the question a
-    tag breakdown answers, and per-date tag cells would be too sparse to read.
-    Nothing renders it yet."""
+    """Genre heatmap: plays per (weekday, part, primary tag). weekday 0=Sunday,
+    part 0-3. Stays an AGGREGATE weekday grid unlike get_listening_clock, because
+    per-date tag cells would be too sparse to read. Nothing renders it yet."""
     weekday = _WEEKDAY.format(col="s.listened_at")
     part = _PART_OF_DAY.format(col="s.listened_at")
     cur.execute(
@@ -235,15 +201,11 @@ def get_genre_clock(cur, user_id: int, tz: str = "UTC"):
 def get_binges(cur, user_id: int, min_plays: int, days: int | None = None):
     """Albums played heavily in a short burst.
 
-    The window counts, for each play, how many plays of that same album fall in
-    the trailing 7-day span. The album's peak of that count is its burst size;
-    keep albums whose peak hits min_plays. Album-less plays are excluded (a real
-    album is required to call something a binge).
+    Each play counts its album's plays in the trailing 7 days; the peak is the
+    burst size. Album-less plays are excluded.
 
-    Two different spans, easy to confuse: the 7-day RANGE is what "binge" MEANS
-    and is fixed, while `days` limits which plays are considered at all and is
-    the range picker. days=30 asks "what did I binge in the last month", still
-    detected over 7-day bursts inside it.
+    Two spans, easy to confuse: the 7-day RANGE is what "binge" means and is
+    fixed; `days` is the range picker and limits which plays are considered.
     """
     recent, recent_params = _recent(days)
     cur.execute(
@@ -274,7 +236,9 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC",
                   days: int | None = None):
     """Tag mix over time: one row per (period, tag) with plays and
     pct_of_period, raw and chart-ready. `period` is "month" (default) or
-    "week" (ISO, Monday start). Each play maps to its artist's primary tag, so
+    "week" (ISO, Monday start), bucketed in the listener's `tz`. `days` limits
+    it to a trailing window (None = all time) and is the Genres range picker,
+    which sums these rows client-side. Each play maps to its artist's primary tag, so
     a period's percentages sum to ~100 -- of TAGGED plays; untagged artists'
     plays are simply absent."""
     # Whitelist the bucket, then pass it as a bound param (never interpolate).
@@ -308,7 +272,8 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC",
 
 def get_listening_time(cur, user_id: int, period: str = "month", tz: str = "UTC"):
     """Listening time per period, in hours, from the stored track durations.
-    `period` is "month" (default) or "week". LEFT JOIN so a play whose track
+    `period` is "month" (default) or "week", bucketed in the listener's `tz`.
+    LEFT JOIN so a play whose track
     hasn't been backfilled yet (or has no duration on Last.fm) still counts
     toward `plays` but adds 0 to `hours`. Sum is in ms; /3.6e6 to get hours.
     """
@@ -334,7 +299,8 @@ def get_listening_time(cur, user_id: int, period: str = "month", tz: str = "UTC"
 
 def get_monthly_report(cur, user_id: int, period: str = "month", tz: str = "UTC"):
     """Per-period totals, with play count vs. the previous period (LAG).
-    `period` is "month" (default) or "week". Artists counted case-insensitively.
+    `period` is "month" (default) or "week", bucketed in the listener's `tz`.
+    Artists counted case-insensitively.
     Output column stays named `month` (it's the period start) so callers don't
     need to branch on the bucket."""
     bucket = "week" if period == "week" else "month"
@@ -364,8 +330,8 @@ def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
     """One row per month: plays, new_artists (artists first heard that month),
     hours (from stored durations), and top_genre (that month's most-played
     primary tag). A real month-over-month digest -- the numbers you can't read
-    off the other charts at a glance. Months are the LISTENER'S, matching the
-    rest of the monthly analytics. hours is 0 for a month whose tracks aren't
+    off the other charts at a glance. Months are the LISTENER'S via `tz`,
+    matching the rest of the monthly analytics. hours is 0 for a month whose tracks aren't
     backfilled yet; top_genre is NULL until that month has a tagged artist."""
     month = _LOCAL_MONTH.format(col="listened_at")
     month_s = _LOCAL_MONTH.format(col="s.listened_at")
@@ -543,13 +509,11 @@ def parse_search(text: str | None) -> dict:
 
 def _scrobble_filters(user_id: int, search: str | None, start, end,
                       tz: str = "UTC") -> tuple[list, list]:
-    """Build the shared WHERE clause for the history table as (conds, params).
+    """Shared WHERE clause for the history table as (conds, params).
 
-    Both the page query and the total count call this, so the number shown
-    ("of 1,204") can never disagree with the rows underneath it -- the classic
-    way a paged, filtered table goes wrong is two hand-written WHERE clauses
-    drifting apart. `day:`/`part:` reuse the clock's own expressions for the
-    same reason: clicking a heatmap cell must return exactly the plays it counted.
+    The page query and the count both call this, so "of 1,204" can never disagree
+    with the rows under it. `day:`/`part:` reuse the clock's own expressions for
+    the same reason.
     """
     conds = ["user_id = %s"]
     params: list = [user_id]
@@ -607,15 +571,10 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
 def get_scrobbles(cur, user_id: int, search: str | None, limit: int, offset: int,
                   sort: str = "listened_at", direction: str = "desc",
                   start=None, end=None, tz: str = "UTC"):
-    """A page of a user's scrobbles for the browsable, sortable history table.
-    `search` (optional) supports `artist:`/`track:`/`album:`/`year:`/`month:`/
-    `day:`/`part:` terms plus bare text -- see parse_search. `start`/`end`
-    (optional dates) restrict to a range [start, end), which is how a clicked
-    week's bar drills into its scrobbles. `tz` is the IANA zone `day:`/`part:`
-    are interpreted in. `sort` + `direction` order the WHOLE filtered history
-    (not just the page) so paging stays consistent; both are whitelisted.
-    limit/offset paginate; caller clamps limit.
-    """
+    """A page of a user's scrobbles. `search` takes field terms plus bare text
+    (see parse_search); `start`/`end` restrict to [start, end), which is how a
+    clicked week drills in. `sort`/`direction` order the WHOLE filtered history
+    so paging stays consistent, and both are whitelisted."""
     sort = sort if sort in _SCROBBLE_SORT_COLS else "listened_at"
     direction = "ASC" if str(direction).lower() == "asc" else "DESC"
     tiebreak = "" if sort == "listened_at" else ", listened_at DESC"
@@ -635,9 +594,8 @@ def get_scrobbles(cur, user_id: int, search: str | None, limit: int, offset: int
 
 def count_scrobbles(cur, user_id: int, search: str | None, start=None, end=None,
                     tz: str = "UTC") -> int:
-    """How many scrobbles match the same filters get_scrobbles pages through.
-    Lets the table say "1-50 of 1,204" and know when Next is exhausted, instead
-    of inferring the end from a short page."""
+    """Total matching the same filters get_scrobbles pages through, so the table
+    can say "1-50 of 1,204" instead of inferring the end from a short page."""
     conds, params = _scrobble_filters(user_id, search, start, end, tz)
     cur.execute(
         f"SELECT COUNT(*) AS total FROM scrobbles WHERE {' AND '.join(conds)}", params
