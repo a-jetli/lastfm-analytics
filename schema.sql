@@ -22,7 +22,7 @@ CREATE INDEX idx_scrobbles_user_time ON scrobbles (user_id, listened_at);
 CREATE INDEX idx_scrobbles_user_artist ON scrobbles (user_id, artist_name);
 
 -- Track lengths from track.getInfo (Last.fm's scrobble feed carries none).
--- Global cache shared by all users; filled by the overnight backfill.
+-- Global cache shared by all users; filled by the periodic backfill.
 -- duration_ms = 0 when Last.fm has no duration (stored so we don't re-ask).
 CREATE TABLE track_durations (
     artist_name TEXT NOT NULL,
@@ -137,7 +137,7 @@ WHERE s.artist_name IS NULL
 GROUP BY a.artist_name, a.tag;
 
 -- Each artist's globally most-played tracks from artist.getTopTracks, best
--- first (rank 1 = biggest). Feeds song recommendations: fetched nightly for
+-- first (rank 1 = biggest). Feeds song recommendations: fetched on a schedule for
 -- users' favorite artists and for recommended artists. An artist Last.fm
 -- doesn't know gets one sentinel row (track_name = '') so it isn't re-fetched.
 CREATE TABLE artist_top_tracks (
@@ -148,7 +148,7 @@ CREATE TABLE artist_top_tracks (
 );
 
 -- Cached artist recommendations (precomputed output, not source data). Rebuilt
--- nightly per user by sync_service._refresh_recommendations from scrobbles +
+-- per user by sync_service._refresh_recommendations from scrobbles +
 -- artist_tags_clean (TF-IDF/cosine, app/recommender.py); the /recommendations
 -- endpoint serves it as-is. Empty for a user until that pass has run once.
 CREATE TABLE recommendations (

@@ -31,7 +31,7 @@ WAIT_BUDGET_SECONDS = 4
 PAGE_PAUSE_SECONDS = 0.25
 # Scheduler wake interval; a stale user gets picked up within the hour.
 SCHEDULER_TICK_SECONDS = 60 * 60
-# How many recommended artists to cache per user in the overnight recompute.
+# How many recommended artists to cache per user in the maintenance recompute.
 RECOMMEND_TOP_N = 20
 
 # user_id -> the thread currently syncing that user (in this process).
@@ -217,16 +217,16 @@ def start_scheduler() -> None:
 
 def _scheduler_loop() -> None:
     # Sleep first so a fresh boot (and short-lived test runs) don't immediately
-    # hammer Last.fm; then run the overnight pass over and over, forever.
+    # hammer Last.fm; then run the maintenance pass over and over, forever.
     while True:
         time.sleep(SCHEDULER_TICK_SECONDS)
         try:
-            _overnight_pass()
+            _maintenance_pass()
         except Exception:
             log.exception("scheduled maintenance pass failed")
 
 
-def _overnight_pass() -> None:
+def _maintenance_pass() -> None:
     """One maintenance pass per scheduler tick.
 
     Order matters: sync first so new tracks/artists exist before the enrichment
@@ -248,7 +248,7 @@ def _overnight_pass() -> None:
 def _backfill_durations(user_id: int | None = None) -> None:
     """Durations for tracks not yet in track_durations. Commits per row so an
     interrupted pass keeps progress; 0 ms is stored so we don't re-ask. Pass
-    user_id right after a sync, omit for the overnight sweep."""
+    user_id right after a sync, omit for the periodic sweep."""
     with db.get_connection() as conn, conn.cursor() as cur:
         pairs = sync_queries.get_tracks_missing_durations(cur, user_id)
         for artist_name, track_name in pairs:
@@ -367,5 +367,5 @@ if __name__ == "__main__":
     # (inside the container: `docker compose exec app python -m app.sync_service`).
     logging.basicConfig(level=logging.INFO)
     log.info("running one maintenance pass on demand")
-    _overnight_pass()
+    _maintenance_pass()
     log.info("maintenance pass complete")

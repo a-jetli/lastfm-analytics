@@ -55,7 +55,7 @@ def get_user_plays(cur, user_id: int):
 
 
 def get_all_user_ids(cur):
-    """Every user id -- the overnight pass recomputes recommendations for all."""
+    """Every user id -- the maintenance pass recomputes recommendations for all."""
     cur.execute("SELECT id FROM users")
     return [row[0] for row in cur.fetchall()]
 
@@ -78,7 +78,7 @@ def replace_recommendations(cur, user_id: int, ranked: list[tuple[str, float]]) 
 
 
 def get_recommendations(cur, user_id: int):
-    """Cached recommendations for a user, best first. Empty until the overnight
+    """Cached recommendations for a user, best first. Empty until the maintenance
     pass has computed them at least once (same "fills in later" story as
     durations and tags)."""
     cur.execute(

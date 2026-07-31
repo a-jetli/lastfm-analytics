@@ -26,7 +26,7 @@ at /docs.
 
 First load kicks off a background sync. Scrobbles show up as they land, then
 genres and track lengths fill in after. Recommendations are computed by the
-nightly pass, so they stay empty until it runs. To force one now:
+maintenance pass, so they stay empty until it runs. To force one now:
 
 ```
 docker compose exec app python -m app.sync_service

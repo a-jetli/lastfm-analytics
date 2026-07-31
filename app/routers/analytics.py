@@ -148,7 +148,7 @@ def tag_shift(username: str, period: str = "month", tz: str = "UTC", days: int =
 @router.get("/{username}/hours")
 def hours(username: str, period: str = "month", tz: str = "UTC"):
     # Listening time per period ("month" or "week"), in hours, from stored track
-    # durations. Durations arrive via the overnight backfill, so a period can
+    # durations. Durations arrive via the periodic backfill, so a period can
     # read 0 hours until it runs.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -157,8 +157,8 @@ def hours(username: str, period: str = "month", tz: str = "UTC"):
 
 @router.get("/{username}/recommendations")
 def recommendations(username: str):
-    # Everything the recommender has for this user, served from nightly caches
-    # (lists are empty until the overnight pass has run once):
+    # Everything the recommender has for this user, served from precomputed caches
+    # (lists are empty until the maintenance pass has run once):
     #   artists        -- unplayed artists ranked by taste-vector similarity
     #   songs_from_favorites -- popular tracks by their top artists, never played
     #   songs_from_new_artists -- entry tracks into the recommended artists

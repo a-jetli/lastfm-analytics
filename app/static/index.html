@@ -721,7 +721,7 @@ function render(d) {
       <div class="match"><span class="meter"><span style="width:${pct}%"></span></span>
         <span class="pct" title="cosine similarity of genre tags, 0 to 1">${matchLabel(a.score)} · ${a.score.toFixed(2)}</span></div>
       ${gwHtml}</div></div>`;
-  }).join('') || emptyMsg('recommendations are computed nightly, check back tomorrow');
+  }).join('') || emptyMsg('recommendations are computed on a schedule, check back shortly');
 
   // Same numbered .rec skeleton as "Artists to explore" so the two For-you
   // columns read as one design: rank, a title line, a muted sub-line.
@@ -729,7 +729,7 @@ function render(d) {
     <div class="rec"><div class="rk">${String(i + 1).padStart(2, '0')}</div><div>
       <div class="name">${trackLink(s.artist_name, s.track_name)}</div>
       <div class="recby">${artistBtn(s.artist_name)}</div></div></div>`
-  ).join('') || emptyMsg('nothing yet, computed nightly');
+  ).join('') || emptyMsg('nothing yet, computed on a schedule');
 }
 
 function rankRow(kHtml, frac, valText) {

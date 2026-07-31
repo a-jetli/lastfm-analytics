@@ -4,7 +4,7 @@ Run locally:  uvicorn app.main:app --reload   then open /docs.
 
 Layering: routers/* = HTTP (no SQL), queries/* = SQL (no HTTP), lastfm.py =
 the only file that calls Last.fm, sync_service.py = when/how syncs and the
-overnight enrichment run, recommender.py = pure recommendation math.
+periodic enrichment run, recommender.py = pure recommendation math.
 """
 
 from contextlib import asynccontextmanager
