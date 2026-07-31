@@ -93,11 +93,14 @@ jobs:
              docker image prune -f'
 
       - name: Smoke test
-        # A deploy that reports success while the app 500s is worse than one
-        # that fails. Retried because uvicorn takes a moment to bind.
+        # Hits the public hostname, not the instance IP: that is the path a real
+        # visitor takes, so it also proves the Cloudflare tunnel is up, not just
+        # the container. A deploy that reports success while the app 500s is
+        # worse than one that fails. Retried because uvicorn takes a moment to
+        # bind and the tunnel needs a beat to reconnect after the restart.
         run: |
           for i in 1 2 3 4 5; do
-            if curl -fsS --max-time 5 "http://${{ secrets.EC2_HOST }}:8000/health"; then
+            if curl -fsS --max-time 10 "https://rotation.ajetli.com/health"; then
               echo "healthy"; exit 0
             fi
             sleep 5

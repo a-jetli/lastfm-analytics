@@ -26,7 +26,12 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      # Loopback only. Public traffic arrives through a Cloudflare tunnel:
+      # cloudflared runs on the host as a systemd service and connects to
+      # localhost:8000, so nothing needs to reach this port from outside. Binding
+      # to 127.0.0.1 means the app stays unreachable even if a security group
+      # rule is wrong. Change back to "8000:8000" to serve directly again.
+      - "127.0.0.1:8000:8000"
     environment:
       # "db" is the service name above; containers on the compose network
       # reach each other by service name, never "localhost".
