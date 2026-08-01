@@ -292,6 +292,68 @@ def test_tag_corpus_gives_one_vector_per_artist(conn, alice):
     assert len(artists) == len({a.lower() for a in artists})
 
 
+# --- candidate pool widening --------------------------------------------------
+# Every artist in the corpus otherwise arrives through scrobbles, so candidates
+# ("tagged artists you have NOT played") are empty by construction at one user.
+# These cover the two DB-side halves; the Last.fm call itself is not tested.
+
+
+def test_top_artists_are_most_played_first_and_fold_casing(conn, alice):
+    from app.queries import recommend as qrec
+
+    with conn.cursor() as c:
+        top = qrec.get_top_artists(c, alice, limit=10)
+    # Radiohead 6 plays (5 + 1 lowercase), boygenius 5, Nobody 1.
+    assert top[:2] == ["Radiohead", "boygenius"]
+    assert "radiohead" not in top, "casing variant leaked in as a second seed"
+
+
+def test_filter_unknown_artists_drops_played_and_tagged(conn, alice):
+    """The bound on API cost. Anything already scrobbled, or already asked about,
+    must not come back, or every pass re-fetches the same artists forever."""
+    from app.queries import recommend as qrec
+
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Already Tagged", "rock", 100)
+        conn.commit()
+        got = qrec.filter_unknown_artists(
+            c, ["RADIOHEAD", "Already Tagged", "Genuinely New"]
+        )
+    assert got == ["Genuinely New"]  # played (any casing) and tagged both dropped
+
+
+def test_filter_unknown_artists_handles_an_empty_batch(conn, alice):
+    from app.queries import recommend as qrec
+
+    with conn.cursor() as c:
+        assert qrec.filter_unknown_artists(c, []) == []
+
+
+def test_a_tagged_unplayed_artist_becomes_recommendable(conn, alice):
+    """The whole point: an artist with tags but no scrobbles is a candidate,
+    which is what the widening step creates."""
+    from app import recommender
+    from app.queries import recommend as qrec
+
+    with conn.cursor() as c:
+        qsync.insert_artist_tag(c, "Radiohead", "shoegaze", 100)
+        qsync.insert_artist_tag(c, "boygenius", "shoegaze", 100)
+        qsync.insert_artist_tag(c, "Nobody", "jazz", 100)
+        qsync.insert_artist_tag(c, "Widened Candidate", "shoegaze", 100)  # no scrobbles
+        conn.commit()
+
+        corpus: dict[str, dict[str, float]] = {}
+        for artist, tag, weight in qrec.get_tag_corpus(c):
+            corpus.setdefault(artist, {})[tag] = float(weight)
+        plays = dict(qrec.get_user_plays(c, alice))
+
+    vectors = recommender.build_artist_vectors(corpus, recommender.compute_idf(corpus))
+    ranked = recommender.recommend(
+        recommender.build_user_vector(plays, vectors), vectors, set(plays)
+    )
+    assert "Widened Candidate" in {artist for artist, _ in ranked}
+
+
 # --- the tag exclusion rule ---------------------------------------------------
 
 

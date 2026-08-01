@@ -241,8 +241,77 @@ def _maintenance_pass() -> None:
     _sync_all_stale()
     _backfill_durations()
     _backfill_artist_tags()
+    _widen_candidate_pool()  # before recommendations: it is what they score against
     _refresh_recommendations()
     _backfill_top_tracks()
+
+
+def _widen_candidate_pool() -> None:
+    """Pull in artists NOBODY here has played, so there is something to recommend.
+
+    Every other artist in the corpus arrives through scrobbles, which makes the
+    recommender useless at low user counts: candidates are "tagged artists you
+    have not played", and with one user that set is empty by construction. On the
+    live box it produced exactly one recommendation.
+
+    Per user: take their top SEED_ARTISTS, ask Last.fm for SIMILAR_PER_ARTIST
+    similar artists each, drop everything already known, and fetch tags for the
+    rest. The new rows are artist_tags only, with no scrobbles attached, which is
+    what makes them recommendable rather than "already played".
+
+    Cost is bounded and shrinks. The work list is filtered by NOT EXISTS, so a
+    user's first pass fetches up to SEED_ARTISTS * SIMILAR_PER_ARTIST names and
+    later passes fetch almost none as the corpus converges. Tag rows are tiny
+    (a name, a tag, an int), so this stays far inside the ToS 100MB cap; the real
+    cost is call volume, which the pause below keeps polite.
+    """
+    with db.get_connection() as conn, conn.cursor() as cur:
+        user_ids = recommend_queries.get_all_user_ids(cur)
+
+    for user_id in user_ids:
+        with db.get_connection() as conn, conn.cursor() as cur:
+            # Skip users the pool already serves. Without this the 10 getSimilar
+            # calls below repeat every tick, per user, forever, to learn nothing:
+            # the tag fetches stop (NOT EXISTS) but the seed lookups do not.
+            if len(recommend_queries.get_recommendations(cur, user_id)) >= RECOMMEND_TOP_N:
+                continue
+            seeds = recommend_queries.get_top_artists(cur, user_id)
+
+        similar: list[str] = []
+        for seed in seeds:
+            try:
+                similar += lastfm.get_similar_artists(
+                    seed, limit=recommend_queries.SIMILAR_PER_ARTIST
+                )
+            except Exception:
+                # One bad lookup must not abort the pass; retried next tick.
+                log.exception("similar-artist fetch failed for %s", seed)
+            time.sleep(PAGE_PAUSE_SECONDS)
+
+        # Dedupe within this batch before asking the DB, so a name suggested by
+        # several seeds costs one filter check and one tag fetch, not five.
+        seen: dict[str, str] = {}
+        for name in similar:
+            seen.setdefault(name.lower(), name)
+
+        with db.get_connection() as conn, conn.cursor() as cur:
+            unknown = recommend_queries.filter_unknown_artists(cur, list(seen.values()))
+
+        for artist_name in unknown:
+            try:
+                tags = lastfm.get_artist_tags(artist_name)
+            except Exception:
+                log.exception("tag fetch failed for candidate %s", artist_name)
+                continue
+            with db.get_connection() as conn, conn.cursor() as cur:
+                if tags:
+                    for tag, weight in tags:
+                        sync_queries.insert_artist_tag(cur, artist_name, tag, weight)
+                else:
+                    # Same sentinel the scrobble-driven backfill uses: "asked,
+                    # nothing there", so filter_unknown_artists stops returning it.
+                    sync_queries.insert_artist_tag(cur, artist_name, "", 0)
+            time.sleep(PAGE_PAUSE_SECONDS)
 
 
 def _backfill_durations(user_id: int | None = None) -> None:

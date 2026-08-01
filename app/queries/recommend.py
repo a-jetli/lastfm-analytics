@@ -97,6 +97,60 @@ def get_recommendations(cur, user_id: int):
 FAVORITE_ARTISTS = 15
 
 
+# How many of a user's top artists to ask Last.fm for similars, and how many
+# similars each. 10 x 10 = at most 100 names per user per pass, nearly all of
+# which are already known after the first run.
+SEED_ARTISTS = 10
+SIMILAR_PER_ARTIST = 10
+
+
+def get_top_artists(cur, user_id: int, limit: int = SEED_ARTISTS):
+    """A user's most-played artists, best first. Seeds the similar-artist
+    lookup. Grouped case-insensitively with a mode() display name, matching
+    get_user_plays, so a mixed-casing artist is one seed and not two."""
+    cur.execute(
+        """
+        SELECT mode() WITHIN GROUP (ORDER BY artist_name) AS artist_name
+        FROM scrobbles
+        WHERE user_id = %s
+        GROUP BY lower(artist_name)
+        ORDER BY COUNT(*) DESC
+        LIMIT %s
+        """,
+        (user_id, limit),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def filter_unknown_artists(cur, names: list[str]) -> list[str]:
+    """Of `names`, the ones we have no tags for yet.
+
+    Two filters in one pass, both case-insensitive: drop anything already in
+    artist_tags (we have it, or we asked and Last.fm had nothing), and drop
+    anything anyone has actually scrobbled (already in the corpus through the
+    normal path). What is left is genuinely new candidate material.
+
+    This is what keeps the API cost bounded: the first pass for a user fetches
+    up to ~100 artists, later passes fetch almost none, because the answer
+    shrinks to nothing as the corpus converges.
+    """
+    if not names:
+        return []
+    cur.execute(
+        """
+        SELECT n FROM unnest(%s::text[]) AS n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM artist_tags a WHERE lower(a.artist_name) = lower(n)
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM scrobbles s WHERE lower(s.artist_name) = lower(n)
+        )
+        """,
+        (names,),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 def get_artists_missing_top_tracks(cur):
     """Work list for the top-tracks backfill: artists we want songs for (every
     user's favorites + every recommended artist) that aren't cached yet. Same

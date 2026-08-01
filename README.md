@@ -93,6 +93,14 @@ scaled by log(1 + play score), where play score decays on a 90 day half life so
 recent listening drives the result. Everything you haven't played gets scored by
 cosine similarity. Top 20 get cached.
 
+Candidates can only be artists the app has tags for, and tags are normally only
+fetched for artists someone has played. With few users that leaves almost
+nothing to recommend, so the maintenance pass also takes each user's top 10
+artists, asks Last.fm for 10 similar artists each, and stores tags for any that
+are new. Those artists have no plays attached, which is exactly what makes them
+recommendable. It skips users who already have a full set, so the cost is a
+one-time ~110 API calls per user rather than something that repeats.
+
 Track recommendations skip the vector math, because tags describe artists and
 not songs. They come from SQL over cached top tracks: popular songs by artists
 you already love but have never played, and entry points into each recommended

@@ -119,6 +119,32 @@ def get_artist_tags(artist: str) -> list[tuple[str, int]]:
     return [(t["name"], int(t.get("count") or 0)) for t in raw if t.get("name")]
 
 
+def get_similar_artists(artist: str, limit: int = 10) -> list[str]:
+    """Artist names Last.fm considers similar to `artist`, best match first.
+
+    The only source of artists nobody here has played. Everything else in the
+    corpus comes from scrobbles, which means with few users the recommender has
+    almost nothing to recommend: candidates are "tagged artists you have NOT
+    played", and with one user that set is empty by construction.
+
+    Returns [] if Last.fm has no similars. Raises only on transport failure,
+    which the caller catches and retries next pass.
+    """
+    params = {
+        "method": "artist.getSimilar",
+        "artist": artist,
+        "limit": limit,
+        "autocorrect": 1,
+        "api_key": API_KEY,
+        "format": "json",
+    }
+    r = requests.get(BASE_URL, params=params)
+    raw = r.json().get("similarartists", {}).get("artist", [])
+    if isinstance(raw, dict):
+        raw = [raw]  # a single result comes back as a bare object, not a list
+    return [a["name"] for a in raw if a.get("name")]
+
+
 def get_artist_top_tracks(artist: str, limit: int = 10) -> list[str]:
     """An artist's most-played tracks (globally, per Last.fm), best first, from
     artist.getTopTracks. Returns [] when Last.fm doesn't know the artist; the
