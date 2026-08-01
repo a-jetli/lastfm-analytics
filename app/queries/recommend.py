@@ -95,6 +95,11 @@ def get_recommendations(cur, user_id: int):
 
 # An artist qualifies as a user "favorite" if it's in their top N by plays.
 FAVORITE_ARTISTS = 15
+# Per-artist caps on the two song lists. Both keep one artist from filling the
+# panel: "From your favourites" round-robins on the first, and the gateway list
+# shows at most the second under each recommended artist.
+TRACKS_PER_FAVORITE = 2
+GATEWAY_TRACKS = 3
 
 
 # How many of a user's top artists to ask Last.fm for similars, and how many
@@ -193,30 +198,46 @@ def insert_top_track(cur, artist_name: str, track_name: str, rank: int) -> None:
 def get_song_recs_favorites(cur, user_id: int):
     """Gap mining: popular tracks by the user's most-played artists that they
     have never played. No taste-guessing involved -- their own plays pick the
-    artists, Last.fm's global ranks pick the tracks. NOTE: the anti-join matches
-    exact track names, so a song scrobbled under a variant title ("... (feat X)")
-    can slip through as a rec; acceptable noise."""
+    artists, Last.fm's global ranks pick the tracks.
+
+    Capped at TRACKS_PER_FAVORITE per artist and ordered round-robin, so 25 slots
+    cover ~13 artists instead of walking the top artist's whole track list first.
+    Ordered by plays DESC it read as "here are two bands", which is not a
+    discovery list.
+
+    NOTE: the anti-join matches exact track names, so a song scrobbled under a
+    variant title ("... (feat X)") can slip through as a rec; acceptable noise.
+    """
     cur.execute(
         """
         WITH favorites AS (
             SELECT artist_name, COUNT(*) AS plays
             FROM scrobbles WHERE user_id = %s
             GROUP BY artist_name ORDER BY plays DESC LIMIT %s
+        ),
+        candidates AS (
+            SELECT t.artist_name, t.track_name, f.plays,
+                   ROW_NUMBER() OVER (PARTITION BY t.artist_name
+                                      ORDER BY t.rank) AS per_artist
+            FROM artist_top_tracks t
+            JOIN favorites f USING (artist_name)
+            WHERE t.track_name <> ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM scrobbles s
+                  WHERE s.user_id = %s
+                    AND s.artist_name = t.artist_name
+                    AND s.track_name  = t.track_name
+              )
         )
-        SELECT t.artist_name, t.track_name, f.plays AS your_artist_plays
-        FROM artist_top_tracks t
-        JOIN favorites f USING (artist_name)
-        WHERE t.track_name <> ''
-          AND NOT EXISTS (
-              SELECT 1 FROM scrobbles s
-              WHERE s.user_id = %s
-                AND s.artist_name = t.artist_name
-                AND s.track_name  = t.track_name
-          )
-        ORDER BY f.plays DESC, t.rank
+        SELECT artist_name, track_name, plays AS your_artist_plays
+        FROM candidates
+        WHERE per_artist <= %s
+        -- per_artist first = every artist's best track, then every artist's
+        -- second, rather than one artist exhausted before the next appears.
+        ORDER BY per_artist, plays DESC
         LIMIT 25
         """,
-        (user_id, FAVORITE_ARTISTS, user_id),
+        (user_id, FAVORITE_ARTISTS, user_id, TRACKS_PER_FAVORITE),
     )
     return cur.fetchall()
 
@@ -224,16 +245,21 @@ def get_song_recs_favorites(cur, user_id: int):
 def get_song_recs_discovery(cur, user_id: int):
     """Entry points into recommended artists: the top few tracks of each artist
     the recommender picked, ordered by how well the artist matched. The user
-    hasn't played these artists at all, so no anti-join is needed."""
+    hasn't played these artists at all, so no anti-join is needed.
+
+    The frontend groups these under their artist, so EVERY recommended artist
+    needs rows or it renders with no "Start with" line. The limit is therefore
+    sized to the whole cached set (GATEWAY_TRACKS per artist, RECOMMEND_TOP_N
+    artists) rather than a flat 25, which used to run out at artist nine.
+    """
     cur.execute(
         """
         SELECT r.artist_name, t.track_name, r.score AS artist_score
         FROM recommendations r
         JOIN artist_top_tracks t USING (artist_name)
-        WHERE r.user_id = %s AND t.track_name <> '' AND t.rank <= 3
+        WHERE r.user_id = %s AND t.track_name <> '' AND t.rank <= %s
         ORDER BY r.rank, t.rank
-        LIMIT 25
         """,
-        (user_id,),
+        (user_id, GATEWAY_TRACKS),
     )
     return cur.fetchall()

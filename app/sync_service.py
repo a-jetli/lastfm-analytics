@@ -294,16 +294,17 @@ def _widen_candidate_pool() -> None:
         for name in similar:
             seen.setdefault(name.lower(), name)
 
+        # One connection for the filter and the whole insert loop, committing per
+        # artist, exactly like _backfill_artist_tags. Opening one per artist meant
+        # ~90 connects on a user's first pass for no benefit.
         with db.get_connection() as conn, conn.cursor() as cur:
             unknown = recommend_queries.filter_unknown_artists(cur, list(seen.values()))
-
-        for artist_name in unknown:
-            try:
-                tags = lastfm.get_artist_tags(artist_name)
-            except Exception:
-                log.exception("tag fetch failed for candidate %s", artist_name)
-                continue
-            with db.get_connection() as conn, conn.cursor() as cur:
+            for artist_name in unknown:
+                try:
+                    tags = lastfm.get_artist_tags(artist_name)
+                except Exception:
+                    log.exception("tag fetch failed for candidate %s", artist_name)
+                    continue
                 if tags:
                     for tag, weight in tags:
                         sync_queries.insert_artist_tag(cur, artist_name, tag, weight)
@@ -311,7 +312,8 @@ def _widen_candidate_pool() -> None:
                     # Same sentinel the scrobble-driven backfill uses: "asked,
                     # nothing there", so filter_unknown_artists stops returning it.
                     sync_queries.insert_artist_tag(cur, artist_name, "", 0)
-            time.sleep(PAGE_PAUSE_SECONDS)
+                conn.commit()
+                time.sleep(PAGE_PAUSE_SECONDS)
 
 
 def _backfill_durations(user_id: int | None = None) -> None:
