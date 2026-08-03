@@ -9,7 +9,12 @@ It works by pulling your scrobble history into a common PostgreSQL database, all
 FastAPI + Postgres backend, one static HTML page as the frontend, served by the
 same app.
 
-<!-- TODO: screenshot here -->
+![Overview](images/heatmap.png)
+
+![Trends](images/listening-trends.png)
+
+![Genres](images/genres.png)
+
 
 ## Run it
 
