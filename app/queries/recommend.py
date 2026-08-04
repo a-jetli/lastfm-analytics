@@ -29,8 +29,8 @@ def get_tag_corpus(cur):
     return cur.fetchall()
 
 
-# Taste-vector recency half-life in days: a play this old counts half as much as
-# one today. Keeps a season dominant without erasing older favourites. A knob.
+# taste-vector recency half-life in days - a play this old counts half as much as
+# one today. keeps a season dominant without wiping out older favourites. a knob.
 TASTE_HALF_LIFE_DAYS = 90
 
 
@@ -38,8 +38,8 @@ def get_user_plays(cur, user_id: int):
     """(artist_name, recency_weight) per artist: 0.5 ** (age_days / half-life)
     summed over their plays.
 
-    EVERY played artist must appear -- this is also the exclusion set, so decay
-    must never reach zero. Grouped on lower(artist_name) like the tag corpus:
+    Every played artist has to appear, since this doubles as the exclusion set,
+    so decay must never reach zero. Grouped on lower(artist_name) like the tag corpus:
     split by casing, 22 plays of "Charli xcx" failed to exclude "Charli XCX".
     """
     cur.execute(
@@ -55,7 +55,7 @@ def get_user_plays(cur, user_id: int):
 
 
 def get_all_user_ids(cur):
-    """Every user id -- the maintenance pass recomputes recommendations for all."""
+    """Every user id. The maintenance pass recomputes recommendations for all."""
     cur.execute("SELECT id FROM users")
     return [row[0] for row in cur.fetchall()]
 
@@ -91,20 +91,20 @@ def get_recommendations(cur, user_id: int):
     return cur.fetchall()
 
 
-# --- Song recommendations (built on artist_top_tracks, no vector math) --------
+# --- song recommendations, built on artist_top_tracks, no vector math ---------
 
-# An artist qualifies as a user "favorite" if it's in their top N by plays.
+# an artist counts as a "favorite" if it's in the user's top N by plays
 FAVORITE_ARTISTS = 15
-# Per-artist caps on the two song lists. Both keep one artist from filling the
-# panel: "From your favourites" round-robins on the first, and the gateway list
+# per-artist caps on the two song lists, both there to stop one artist filling
+# the panel. "From your favourites" round-robins on the first, the gateway list
 # shows at most the second under each recommended artist.
 TRACKS_PER_FAVORITE = 2
 GATEWAY_TRACKS = 3
 
 
-# How many of a user's top artists to ask Last.fm for similars, and how many
-# similars each. 10 x 10 = at most 100 names per user per pass, nearly all of
-# which are already known after the first run.
+# how many of a user's top artists to ask Last.fm for similars, and how many
+# similars each. 10 x 10 = at most 100 names per user per pass, and after the
+# first run nearly all of them are already known.
 SEED_ARTISTS = 10
 SIMILAR_PER_ARTIST = 10
 
@@ -184,7 +184,7 @@ def get_artists_missing_top_tracks(cur):
 
 
 def insert_top_track(cur, artist_name: str, track_name: str, rank: int) -> None:
-    # ON CONFLICT DO NOTHING: idempotent across overlapping/re-run passes.
+    # ON CONFLICT DO NOTHING, so overlapping or re-run passes are idempotent
     cur.execute(
         """
         INSERT INTO artist_top_tracks (artist_name, track_name, rank)
@@ -197,8 +197,8 @@ def insert_top_track(cur, artist_name: str, track_name: str, rank: int) -> None:
 
 def get_song_recs_favorites(cur, user_id: int):
     """Gap mining: popular tracks by the user's most-played artists that they
-    have never played. No taste-guessing involved -- their own plays pick the
-    artists, Last.fm's global ranks pick the tracks.
+    have never played. No taste-guessing: their own plays pick the artists,
+    Last.fm's global ranks pick the tracks.
 
     Capped at TRACKS_PER_FAVORITE per artist and ordered round-robin, so 25 slots
     cover ~13 artists instead of walking the top artist's whole track list first.

@@ -15,8 +15,8 @@ def create_user(cur, username: str) -> int:
 
 
 def insert_scrobble(cur, user_id: int, track: dict) -> None:
-    # ON CONFLICT DO NOTHING relies on the UNIQUE(user_id, track_name, listened_at)
-    # constraint in schema.sql -- duplicate scrobbles are silently skipped, not errors.
+    # ON CONFLICT DO NOTHING leans on the UNIQUE(user_id, track_name, listened_at)
+    # constraint in schema.sql. duplicate scrobbles get skipped, not raised.
     cur.execute(
         """
         INSERT INTO scrobbles (user_id, artist_name, track_name, album_name, listened_at)
@@ -28,10 +28,10 @@ def insert_scrobble(cur, user_id: int, track: dict) -> None:
 
 
 def update_last_synced(cur, user_id: int, synced_at) -> None:
-    # Stamped with the sync's START time, not now(): pages are fetched newest-
-    # first, so a play scrobbled mid-sync sits on a page we already read. A
-    # start-time mark re-fetches that overlap next sync (ON CONFLICT dedups);
-    # an end-time mark would skip those plays forever.
+    # stamped with the sync's start time, not now(). pages come newest first, so a
+    # play scrobbled mid-sync sits on a page we already read. a start-time mark
+    # re-fetches that overlap next sync and ON CONFLICT dedups it. an end-time mark
+    # would skip those plays forever.
     cur.execute(
         "UPDATE users SET last_synced_at = %s WHERE id = %s", (synced_at, user_id)
     )
@@ -71,8 +71,8 @@ def get_tracks_missing_durations(cur, user_id: int | None = None):
 
 
 def insert_track_duration(cur, artist_name: str, track_name: str, duration_ms: int) -> None:
-    # ON CONFLICT DO NOTHING: two overlapping passes can't double-insert, and a
-    # re-run is harmless (durations don't change).
+    # ON CONFLICT DO NOTHING, so two overlapping passes can't double-insert and a
+    # re-run is harmless. durations don't change.
     cur.execute(
         """
         INSERT INTO track_durations (artist_name, track_name, duration_ms)
@@ -112,7 +112,7 @@ def get_artists_missing_tags(cur, user_id: int | None = None):
 
 
 def insert_artist_tag(cur, artist_name: str, tag: str, weight: int) -> None:
-    # ON CONFLICT DO NOTHING: idempotent across overlapping/re-run passes.
+    # ON CONFLICT DO NOTHING, so overlapping or re-run passes are idempotent
     cur.execute(
         """
         INSERT INTO artist_tags (artist_name, tag, weight)

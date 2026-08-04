@@ -20,17 +20,17 @@ from app.routers import analytics, sync
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # On boot: start the daily background refresh loop. Nothing on shutdown.
+    # on boot, start the daily background refresh loop. nothing on shutdown.
     sync_service.start_scheduler()
     yield
 
 
 app = FastAPI(title="Rotation", lifespan=lifespan)
 
-# The deployed frontend is served by this app (same origin, no CORS needed).
-# This only opens the API to a LOCAL static dev server -- e.g. VS Code Live
-# Server on :5500 -- so the page can be edited/reloaded there while still
-# talking to this backend. Any localhost port; nothing public is allowed.
+# the deployed frontend is served by this app, same origin, no CORS needed. this
+# only opens the API to a local static dev server (VS Code Live Server on :5500,
+# say) so the page can be edited and reloaded there while still talking to this
+# backend. any localhost port, nothing public.
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
@@ -47,7 +47,7 @@ def health():
     return {"status": "ok"}
 
 
-# The frontend: plain files in app/static, served by this same process. Mounted
+# the frontend, plain files in app/static served by this same process. mounted
 # last so it only answers URLs no API route claimed (html=True serves index.html
-# at /). Same origin as the API, so the page's fetch() calls need no CORS.
+# at /). same origin as the API, so the page's fetch() calls need no CORS.
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True))

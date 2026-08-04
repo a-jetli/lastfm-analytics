@@ -1,4 +1,4 @@
-"""SQL for the insight endpoints -- the SQL layer (read side).
+"""SQL for the insight endpoints, the read side.
 
 One function per feature: takes a cursor (+ params), runs one query, returns
 rows. No HTTP here; routers/analytics.py serves the rows as JSON. All genre
@@ -12,8 +12,8 @@ from datetime import date
 
 from app import recommender  # reuse the cosine function for taste compatibility
 
-# Shared CTE: each artist's single strongest cleaned tag ("primary genre").
-# Every tag-based query below builds on it so the definition lives in one place.
+# shared CTE: each artist's single strongest cleaned tag, their "primary genre".
+# every tag-based query below builds on it, so the definition lives in one place.
 _PRIMARY_TAG_CTE = (
     "WITH primary_tag AS (SELECT DISTINCT ON (artist_name) artist_name, tag "
     "FROM artist_tags_clean ORDER BY artist_name, weight DESC, tag)"
@@ -33,8 +33,8 @@ def get_streaks(cur, user_id: int, tz: str = "UTC"):
     """Consecutive-day listening runs (gaps-and-islands).
 
     Gaps-and-islands: day minus row-number is constant while days are
-    consecutive, so it groups a run. Days are the listener's -- on UTC days a 9pm
-    Monday play and a 9am Wednesday play report a streak that never happened.
+    consecutive, so it groups a run. Days are the listener's, because on UTC days
+    a 9pm Monday play and a 9am Wednesday play report a streak that never was.
     """
     day = _LOCAL_DATE.format(col="listened_at")
     cur.execute(
@@ -100,7 +100,7 @@ def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
     """
     day = _LOCAL_DATE.format(col="listened_at")
     recent, recent_params = _recent(days)
-    # Grouped case-insensitively; mode() picks the most common casing to display.
+    # grouped case-insensitively, mode() picks the most common casing to show
     cur.execute(
         f"""
         WITH plays AS (
@@ -128,13 +128,13 @@ def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
     return cur.fetchall()
 
 
-# Defined ONCE: the clock groups by these and the scrobble filter matches on
-# them, so a cell's count always equals the rows clicking it returns.
-# Parts are 6-hour blocks: 0=night, 1=morning, 2=afternoon, 3=evening.
+# defined once: the clock groups by these and the scrobble filter matches on
+# them, so a cell's count always equals the rows a click returns.
+# parts are 6-hour blocks: 0=night, 1=morning, 2=afternoon, 3=evening.
 _PART_OF_DAY = "(EXTRACT(HOUR FROM {col} AT TIME ZONE %s)::int / 6)"
 _WEEKDAY = "EXTRACT(DOW FROM {col} AT TIME ZONE %s)::int"
-# Bare listened_at::date and date_trunc both resolve in the SESSION timezone, so
-# a 9pm play lands on tomorrow and a 9pm 31st play lands in next month. Every
+# bare listened_at::date and date_trunc both resolve in the session timezone, so
+# a 9pm play lands on tomorrow and a 9pm play on the 31st lands next month. every
 # date bucket in this file goes through one of these three.
 _LOCAL_DATE = "({col} AT TIME ZONE %s)::date"  # 1 param: tz
 _LOCAL_MONTH = "date_trunc('month', {col} AT TIME ZONE %s)::date"  # 1 param: tz
@@ -238,13 +238,13 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC",
     pct_of_period, raw and chart-ready. `period` is "month" (default) or
     "week" (ISO, Monday start), bucketed in the listener's `tz`. `days` limits
     it to a trailing window (None = all time) and is the Genres range picker,
-    which sums these rows client-side. Each play maps to its artist's primary tag, so
-    a period's percentages sum to ~100 -- of TAGGED plays; untagged artists'
-    plays are simply absent."""
-    # Whitelist the bucket, then pass it as a bound param (never interpolate).
+    which sums these rows client side. Each play maps to its artist's primary tag,
+    so a period's percentages sum to ~100 of the tagged plays. Untagged artists'
+    plays are just absent."""
+    # whitelist the bucket, then bind it as a param. never interpolate.
     bucket = "week" if period == "week" else "month"
     period_start = _LOCAL_PERIOD.format(col="s.listened_at")
-    # `days` also drives the Genres panel, which sums these rows client-side.
+    # `days` also drives the Genres panel, which sums these rows client side
     recent, recent_params = _recent(days, "s.listened_at")
     cur.execute(
         _PRIMARY_TAG_CTE + f""",
@@ -329,8 +329,8 @@ def get_monthly_report(cur, user_id: int, period: str = "month", tz: str = "UTC"
 def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
     """One row per month: plays, new_artists (artists first heard that month),
     hours (from stored durations), and top_genre (that month's most-played
-    primary tag). A real month-over-month digest -- the numbers you can't read
-    off the other charts at a glance. Months are the LISTENER'S via `tz`,
+    primary tag). A month-over-month digest of the numbers you can't read off the
+    other charts at a glance. Months are the listener's via `tz`,
     matching the rest of the monthly analytics. hours is 0 for a month whose tracks aren't
     backfilled yet; top_genre is NULL until that month has a tagged artist."""
     month = _LOCAL_MONTH.format(col="listened_at")
@@ -387,7 +387,7 @@ def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
         LEFT JOIN genre_per_month g ON g.month = m.month
         ORDER BY m.month
         """,
-        # One (tz, user_id) pair per CTE, in the order the CTEs appear above.
+        # one (tz, user_id) pair per CTE, in the order they appear above
         (tz, user_id, tz, user_id, tz, user_id, tz, user_id),
     )
     return cur.fetchall()
@@ -402,8 +402,8 @@ def get_artist_detail(cur, user_id: int, name: str) -> dict:
         (user_id, name),
     )
     plays = cur.fetchone()["plays"]
-    # GROUP BY collapses mixed-casing artist rows (both variants carry tag/track
-    # rows) so tags and tracks aren't listed twice.
+    # GROUP BY collapses mixed-casing artist rows - both variants carry tag/track
+    # rows - so tags and tracks aren't listed twice
     cur.execute(
         """
         SELECT tag, MAX(weight) AS weight FROM artist_tags_clean
@@ -427,36 +427,36 @@ def get_artist_detail(cur, user_id: int, name: str) -> dict:
     return {"name": name, "plays": plays, "tags": tags, "top_tracks": tracks}
 
 
-# Columns the history table is allowed to sort by. Whitelisted so `sort` can be
-# safely interpolated into ORDER BY (a bound param can't name a column).
+# columns the history table may sort by. whitelisted so `sort` can be safely
+# interpolated into ORDER BY, since a bound param can't name a column.
 _SCROBBLE_SORT_COLS = {"listened_at", "artist_name", "track_name", "album_name"}
 
-# One search term: an optional `field:` prefix, then either a "quoted value"
-# (artist names have spaces) or a bare run of non-space characters. Deliberately
-# not shlex -- shlex raises on an unbalanced apostrophe, and "Guns N' Roses" is a
-# real artist a user will type.
+# one search term: optional `field:` prefix, then either a "quoted value"
+# (artist names have spaces) or a bare run of non-space characters. not shlex on
+# purpose - shlex raises on an unbalanced apostrophe, and "Guns N' Roses" is a
+# real artist someone will type.
 _TERM_RE = re.compile(r'(?:(\w+):)?(?:"([^"]*)"|(\S+))')
 
-# Fields that filter one text column. Values are the column names -- never taken
-# from user input, only looked up here, so interpolating them is safe.
+# fields that filter one text column. values are column names, only ever looked
+# up here and never taken from user input, so interpolating them is safe.
 _SEARCH_TEXT_FIELDS = {"artist": "artist_name", "track": "track_name",
                        "album": "album_name"}
 
-# month:january / month:jan / month:1 all mean the same thing. Built from the
+# month:january / month:jan / month:1 all mean the same thing. built from the
 # stdlib so the twelve names aren't hand-typed (index 0 is "" in both lists).
 _MONTH_NUMBERS = {name.lower(): n for n, name in enumerate(calendar.month_name) if name}
 _MONTH_NUMBERS.update({a.lower(): n for n, a in enumerate(calendar.month_abbr) if a})
 
-# day:friday / day:fri -> Postgres DOW. calendar counts Monday=0, Postgres
+# day:friday / day:fri -> postgres DOW. calendar counts Monday=0, postgres
 # counts Sunday=0, hence the shift.
 _DAY_NUMBERS = {name.lower(): (n + 1) % 7 for n, name in enumerate(calendar.day_name)}
 _DAY_NUMBERS.update({a.lower(): (n + 1) % 7 for n, a in enumerate(calendar.day_abbr)})
 
-# part:night / part:morning / ... -> the same 0-3 buckets the clock draws.
+# part:night / part:morning / ... -> the same 0-3 buckets the clock draws
 _PART_NUMBERS = {name: n for n, name in enumerate(PART_NAMES)}
 
 def _is_iso_date(value: str) -> bool:
-    """date:2026-07-15 -- one calendar day. Fully validated here, not left to
+    """date:2026-07-15, one calendar day. Fully validated here, not left to
     Postgres: an impossible date like 2026-02-31 would raise on the cast and
     turn a typo into a 500, where every other field just falls back to text."""
     try:
@@ -476,8 +476,8 @@ def parse_search(text: str | None) -> dict:
     Fields: artist:, track:, album:, year:, month:, date: (ISO), day:, part:.
 
     A term whose field is unknown (`foo:bar`), or whose value doesn't parse as a
-    year or month, falls through to free text rather than being dropped -- typing
-    a colon shouldn't silently delete part of the query. Free terms keep the
+    year or month, falls through to free text rather than being dropped. Typing a
+    colon shouldn't silently delete part of the query. Free terms keep the
     original behavior: match artist OR track, so searching a song title works.
     """
     found: dict = {"artist": [], "track": [], "album": [], "years": [], "months": [],
@@ -502,7 +502,7 @@ def parse_search(text: str | None) -> dict:
         elif key == "part" and low in _PART_NUMBERS:
             found["parts"].append(_PART_NUMBERS[low])
         else:
-            # Unknown field or unparseable value -> search the raw text as typed.
+            # unknown field or unparseable value -> search the raw text as typed
             found["free"].append(f"{field}:{value}" if field else value)
     return found
 
@@ -521,14 +521,14 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
 
     for key, column in _SEARCH_TEXT_FIELDS.items():
         for value in f[key]:
-            # AND'd: `artist:radiohead artist:thom` narrows, it doesn't widen.
+            # AND'd, so `artist:radiohead artist:thom` narrows rather than widens
             conds.append(f"{column} ILIKE %s")
             params.append(f"%{value}%")
 
     if f["years"]:
-        # One "within this year" range per requested year, OR'd together. Using a
-        # date range (not EXTRACT(YEAR ...)) keeps the (user_id, listened_at)
-        # index usable. Several years widen the match.
+        # one "within this year" range per requested year, OR'd together. a date
+        # range rather than EXTRACT(YEAR ...) keeps the (user_id, listened_at)
+        # index usable. several years widen the match.
         year_conds = []
         for year in f["years"]:
             year_conds.append("(listened_at >= %s AND listened_at < %s)")
@@ -536,13 +536,13 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
         conds.append("(" + " OR ".join(year_conds) + ")")
 
     if f["months"]:
-        # No index help possible for "every January" -- it's a scan by nature.
+        # no index can help "every January", it's a scan by nature
         conds.append("EXTRACT(MONTH FROM listened_at) = ANY(%s)")
         params.append(f["months"])
 
     if f["dates"]:
-        # Same local-date expression the heatmap groups by, so clicking a cell
-        # returns exactly the plays that cell counted.
+        # same local-date expression the heatmap groups by, so a clicked cell
+        # gives back exactly the plays it counted
         conds.append(_LOCAL_DATE.format(col="listened_at") + " = ANY(%s::date[])")
         params += [tz, f["dates"]]
 
@@ -558,7 +558,7 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
         conds.append("(artist_name ILIKE %s OR track_name ILIKE %s)")
         params += [f"%{value}%", f"%{value}%"]
 
-    # The week drill-down's explicit range, AND'd on top of anything above.
+    # the week drill-down's explicit range, AND'd on top of anything above
     if start:
         conds.append("listened_at >= %s")
         params.append(start)
@@ -655,13 +655,13 @@ def get_genre_tracks(cur, user_id: int, tag: str):
 def get_compatibility(cur, a_id: int, b_id: int) -> dict:
     """Taste compatibility between two users. Pulls each user's genre play counts
     with SQL, then does the comparison math in plain Python:
-      score          -- 0-100 cosine similarity of their primary-tag play vectors
-      shared_artists -- artists both play, with each user's counts (top 25)
-      shared_tags    -- genres both listen to, with each user's % share
-      divergent_tags -- genres where their shares differ most
+      score          - 0-100 cosine similarity of their primary-tag play vectors
+      shared_artists - artists both play, with each user's counts (top 25)
+      shared_tags    - genres both listen to, with each user's % share
+      divergent_tags - genres where their shares differ most
     """
-    # 1) Each user's primary-tag play counts as a vector {tag: plays}. One query
-    #    covers both users; we split the rows by user_id right after.
+    # 1) each user's primary-tag play counts as a vector {tag: plays}. one query
+    #    covers both, split by user_id right after.
     cur.execute(
         _PRIMARY_TAG_CTE + """
         SELECT s.user_id, p.tag, COUNT(*) AS plays
@@ -678,18 +678,18 @@ def get_compatibility(cur, a_id: int, b_id: int) -> dict:
         target = a_plays if row["user_id"] == a_id else b_plays
         target[row["tag"]] = float(row["plays"])
     if a_id == b_id:
-        # Comparing someone with themselves. The split above puts every row in
-        # a_plays and leaves b_plays empty, which scores 0% next to a full list
-        # of shared artists -- a visibly self-contradicting result, and typing
-        # your own handle into the compare box is the first thing anyone tries.
+        # comparing someone with themselves. the split above puts every row in
+        # a_plays and leaves b_plays empty, scoring 0% next to a full list of
+        # shared artists - obvious nonsense, and typing your own handle into the
+        # compare box is the first thing anyone does.
         b_plays = dict(a_plays)
 
-    # 2) Score = cosine similarity of the two vectors (reusing the recommender's
-    #    function), shown as a 0-100 percentage.
+    # 2) score = cosine similarity of the two vectors, reusing the recommender's
+    #    function, shown as 0-100.
     score = round(100 * recommender.cosine(a_plays, b_plays), 1)
 
-    # 3) Genre shares: each tag as a percent of that user's tagged plays. "or 1"
-    #    avoids divide-by-zero for a user with no tagged plays (they get 0%).
+    # 3) genre shares: each tag as a percent of that user's tagged plays. "or 1"
+    #    dodges divide-by-zero for someone with no tagged plays, who gets 0%.
     total_a = sum(a_plays.values()) or 1
     total_b = sum(b_plays.values()) or 1
     tag_rows = []
@@ -704,9 +704,9 @@ def get_compatibility(cur, a_id: int, b_id: int) -> dict:
     )[:15]
     divergent_tags = sorted(tag_rows, key=lambda r: r["gap"], reverse=True)[:10]
 
-    # 4) Shared artists: those both users have played, with each user's counts.
-    # Wrapped in a subquery so a_plays/b_plays are real columns we can filter and
-    # sort by (Postgres won't allow SELECT aliases in an ORDER BY expression).
+    # 4) shared artists, with both users' counts. wrapped in a subquery so
+    # a_plays/b_plays are real columns to filter and sort on - postgres won't take
+    # SELECT aliases in an ORDER BY expression.
     cur.execute(
         """
         SELECT artist_name, a_plays, b_plays FROM (

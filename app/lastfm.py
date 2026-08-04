@@ -1,4 +1,4 @@
-"""All Last.fm API calls live here -- the only file that talks to the outside."""
+"""All Last.fm API calls live here, the only file that talks to the outside."""
 
 import os
 import requests
@@ -35,9 +35,9 @@ def getrecents(
         params["from"] = since
 
     r = requests.get(BASE_URL, params=params)
-    # Last.fm signals "user not found" as HTTP 404 with a JSON body {"error":6}.
-    # Read the body BEFORE raise_for_status so we can tell that apart from a real
-    # transport failure (500, timeout) and raise a specific, non-retryable error.
+    # Last.fm signals "user not found" as a 404 with a JSON body {"error":6}. read
+    # the body before raise_for_status so we can tell it apart from a real
+    # transport failure (500, timeout) and raise something non-retryable.
     try:
         payload = r.json()
     except ValueError:
@@ -56,16 +56,16 @@ def getrecents(
         {
             "name": t["name"],
             "artist": t["artist"]["#text"],
-            # Empty album text -> None (not ""), so "no album" is one honest value.
-            # Otherwise every album-less single shares the "" album and the binge
-            # query would group them as one fake album.
+            # empty album text -> None, not "", so "no album" is one honest value.
+            # otherwise every album-less single shares the "" album and the binge
+            # query groups them into one fake album.
             "album": t.get("album", {}).get("#text") or None,
             "date": t["date"]["#text"],
             "uts": t["date"]["uts"],
         }
         for t in raw
-        # The "now playing" track has no `date` key yet -- skip it, or t["date"]
-        # would KeyError. It'll be picked up on the next sync once it's logged.
+        # the "now playing" track has no `date` key yet, so skip it or t["date"]
+        # KeyErrors. next sync picks it up once it's logged.
         if "date" in t
     ]
     return tracks, total_pages
@@ -88,8 +88,8 @@ def get_track_info(artist: str, track: str) -> int:
     }
     r = requests.get(BASE_URL, params=params)
     data = r.json()
-    # A missing "track" key means a Last.fm-level error (e.g. track not found).
-    # That's not a transport failure -- there's just no duration, so store 0.
+    # a missing "track" key is a Last.fm-level error, e.g. track not found. not a
+    # transport failure, there's just no duration, so store 0.
     if "track" not in data:
         return 0
     return int(data["track"].get("duration") or 0)
@@ -102,7 +102,7 @@ def get_artist_tags(artist: str) -> list[tuple[str, int]]:
     "count". Returns [] when Last.fm has no tags for the artist (or doesn't know
     them); the caller stores a sentinel so it isn't re-fetched. Raises only on a
     real network/HTTP transport failure, which the backfill catches and retries.
-    Tags are raw here -- blocklist/alias cleaning happens at read time.
+    Tags are raw here, blocklist/alias cleaning happens at read time.
     """
     params = {
         "method": "artist.getTopTags",

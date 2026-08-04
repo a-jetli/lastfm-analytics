@@ -12,9 +12,9 @@ router = APIRouter(prefix="/sync", tags=["sync"])
 
 @router.post("/{username}")
 def sync_user(username: str):
-    # join() validates a new handle against Last.fm before creating any row, so a
-    # typo returns a clean 404 instead of a phantom user + endless spinner.
-    # force=True: pressing Load is an explicit "refresh me now".
+    # join() checks a new handle against Last.fm before creating any row, so a typo
+    # gets a clean 404 rather than a phantom user and an endless spinner.
+    # force=True because pressing Load is an explicit "refresh me now".
     try:
         _, is_new = sync_service.join(username, force=True, wait=True)
     except lastfm.LastfmUserNotFound:

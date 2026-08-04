@@ -2,8 +2,8 @@
 numpy, no DB (reads/caching live in sync_service + queries/recommend.py).
 
 The idea: each artist is a vector over genre tags, a user's taste is the sum
-of their played artists' vectors (each artist weighted by how much AND how
-recently they've been played -- see get_user_plays), and unplayed artists are
+of their played artists' vectors (each weighted by how much and how recently
+it's been played, see get_user_plays), and unplayed artists are
 ranked by cosine similarity (direction of taste, not volume). TF-IDF discounts
 tags that are on every artist so distinctive matches ("shoegaze") outweigh
 generic ones ("rock").
@@ -35,7 +35,7 @@ def build_artist_vectors(
     for artist, tags in corpus.items():
         total = sum(tags.values())
         if total == 0:
-            continue  # weightless/sentinel-only artist -- nothing to compare
+            continue  # weightless or sentinel-only artist, nothing to compare
         vectors[artist] = {
             tag: (weight / total) * idf[tag] for tag, weight in tags.items()
         }
@@ -50,9 +50,9 @@ def build_user_vector(
     have no vector for are skipped.
 
     `play_score` is per artist. It's a raw count in the unit tests, but in
-    production it's the RECENCY-WEIGHTED score from get_user_plays (recent
-    listening weighted up), so the vector reflects current taste. The log
-    compression works the same on either -- it just tempers heavy values."""
+    production it's the recency-weighted score from get_user_plays, so the vector
+    reflects current taste. The log compression works the same on either, it just
+    tempers heavy values."""
     taste: dict[str, float] = defaultdict(float)
     for artist, play_score in plays.items():
         vec = artist_vectors.get(artist)
@@ -69,7 +69,7 @@ def cosine(a: dict[str, float], b: dict[str, float]) -> float:
     if either vector is empty or zero-length."""
     if not a or not b:
         return 0.0
-    # dot product = sum of a[tag]*b[tag] over the tags both vectors have
+    # dot product = sum of a[tag]*b[tag] over the tags both vectors share
     dot = 0.0
     for tag in a:
         if tag in b:

@@ -5,14 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rotation</title>
 <script>
-  // set theme before paint to avoid a flash; default to the bright (light) theme
+  // set theme before paint so it doesn't flash. light by default.
   (function () { try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'light'); } catch (e) {} })();
 </script>
 <style>
-  /* Cool Gradient Skies: violet #6331FF is the accent, peach #FFB68A the
-     counterweight, near-black #000001 and lavender #CEC8FA the poles. Light
-     mode sits on the pale lavender end of the ramp, dark mode on the deep
-     indigo end, so both are the same palette rather than two schemes. */
+  /* Cool Gradient Skies. violet #6331FF accent, peach #FFB68A against it,
+     #000001 and #CEC8FA at the ends. light mode sits on the lavender end of
+     the ramp, dark on the indigo end - one palette, not two schemes. */
   :root {
     --bg: #f6f5fe; --bg-2: #ffffff; --raise: #ffffff;
     --ink: #09002c; --ink-2: #47179a; --muted: #595f61;
@@ -25,7 +24,7 @@
     --bg: #09002c; --bg-2: #150c40; --raise: #240855;
     --ink: #f6f5fe; --ink-2: #cec8fa; --muted: #9089c0;
     --line: rgba(206,200,250,.15); --chip: rgba(206,200,250,.07);
-    /* Lifted off #6331FF: the pure accent vibrates against a dark ground. */
+    /* lifted off #6331FF, which vibrates on a dark ground */
     --accent: #8a6af3; --accent-2: #ffb68a; --on-accent: #09002c;
   }
   * { box-sizing: border-box; margin: 0; }
@@ -50,8 +49,8 @@
   .iconbtn { background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-2);
              padding: 8px 11px; font-size: 15px; line-height: 1; }
   .iconbtn:hover { color: var(--ink); border-color: var(--accent); }
-  /* Sync/progress pill: hidden when idle, prominent while a pull runs. A
-     pulsing dot signals live activity so it reads as "working", not static. */
+  /* sync pill: gone when idle, loud while a pull runs. the dot pulses so it
+     reads as working, not stuck. */
   #status:empty { display: none; }
   #status:not(:empty) { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
     color: var(--ink); padding: 7px 13px 7px 11px; border-radius: 999px;
@@ -83,12 +82,16 @@
   nav.tabs button:hover { color: var(--ink); }
   nav.tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
 
-  .panel { display: grid; gap: 32px; }
+  /* minmax(0,1fr), never a bare auto/1fr track: an auto column sizes to
+     max-content, so the longest unwrapped .note line below would set the width
+     of every panel and shove the page past the viewport. Same reason on every
+     grid in this file. */
+  .panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .panel[hidden] { display: none; }
   section.block > .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; }
   .head h3 { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: -.2px; }
   .head .cap { color: var(--muted); font-size: 13px; }
-  /* Range picker: margin-left:auto pushes it to the far edge of the head row. */
+  /* margin-left:auto shoves the range picker out to the edge of the head row */
   .ranges { margin-left: auto; display: flex; gap: 4px; }
   .ranges button { background: none; color: var(--muted); font-size: 12px; cursor: pointer;
     border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; line-height: 1.5; }
@@ -111,11 +114,13 @@
                    font-size: 11px; color: var(--ink-2); white-space: nowrap; }
   #hbars .bar { background: var(--accent-2); }
   .xlabels { display: flex; gap: 7px; margin-top: 9px; }
-  .xlabels span { flex: 1; text-align: center; font-size: 11px; color: var(--muted); }
+  /* min-width:0 or the labels won't shrink past their longest word and drag
+     the page wider than the screen. bars above shrink either way. */
+  .xlabels span { flex: 1; min-width: 0; text-align: center; font-size: 11px; color: var(--muted); }
 
-  /* Calendar heatmap: x = one real date per column, y = part of day. Cell size
-     (--hc) is set per-render: cells grow to fill the width for a short history
-     and cap for a long one, where the strip scrolls instead. */
+  /* calendar heatmap. x = one real date per column, y = part of day. --hc is
+     set per render: cells grow to fill the width on a short history, cap on a
+     long one and the strip scrolls instead. */
   .hm { display: flex; gap: 8px; font-size: 10px; color: var(--muted); --hc: 13px; }
   .hm-rowlabels { display: flex; flex-direction: column; gap: 3px; flex: none; width: 58px; padding-top: 16px; }
   .hm-rowlabels span { height: var(--hc); line-height: var(--hc); white-space: nowrap; text-align: right; }
@@ -126,16 +131,16 @@
   .hm-col { display: flex; flex-direction: column; gap: 3px; flex: none; }
   .hm-cell { width: var(--hc); height: var(--hc); border-radius: 2px; border: 0; padding: 0;
     background: var(--chip); cursor: pointer; }
-  /* Five discrete steps, like a contributions graph: a continuous opacity ramp
-     makes neighbouring days indistinguishable. */
+  /* five steps, like a contributions graph. a continuous opacity ramp makes
+     neighbouring days impossible to tell apart. */
   .hm-cell[data-lvl="1"] { background: color-mix(in srgb, var(--accent) 25%, transparent); }
   .hm-cell[data-lvl="2"] { background: color-mix(in srgb, var(--accent) 48%, transparent); }
   .hm-cell[data-lvl="3"] { background: color-mix(in srgb, var(--accent) 72%, transparent); }
   .hm-cell[data-lvl="4"] { background: var(--accent); }
   .hm-cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
-  /* Genre clock: same grid mechanics, --accent-2 so it reads as the genre
-     colour (matching the meters under Genres) and never as a second play count. */
-  .gm { display: grid; grid-template-columns: 58px repeat(7, 1fr); gap: 3px; align-items: stretch; }
+  /* genre clock: same grid mechanics, --accent-2 so it reads as the genre
+     colour (same as the meters under Genres), never as a second play count. */
+  .gm { display: grid; grid-template-columns: 58px repeat(7, minmax(0, 1fr)); gap: 3px; align-items: stretch; }
   .gm .lbl { font-size: 11px; color: var(--muted); align-self: center; }
   .gm .hd { font-size: 11px; color: var(--muted); text-align: center; padding-bottom: 2px; }
   .gm-cell { border: 0; border-radius: 3px; padding: 6px 4px; min-height: 46px; cursor: pointer;
@@ -149,11 +154,12 @@
   .gm-cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
   .gm-cell[data-lvl="0"] { cursor: default; color: var(--muted); }
   .gm-cell[data-lvl="0"]:hover { outline: 0; }
-  @media (max-width: 620px) { .gm-cell { font-size: 10px; min-height: 40px; } .gm { grid-template-columns: 40px repeat(7, 1fr); } }
+  /* 52px, not 40: "afternoon" has to fit on one line or it breaks mid-word */
+  @media (max-width: 620px) { .gm-cell { font-size: 10px; min-height: 40px; }
+    .gm { grid-template-columns: 52px repeat(7, minmax(0, 1fr)); } .gm .lbl { font-size: 10px; } }
   .hm-cell[data-lvl="0"] { cursor: default; }
   .hm-cell[data-lvl="0"]:hover { outline: 0; }
-  /* Custom heatmap tooltip: native title= waits ~1s before showing; this
-     appears on hover with no delay. */
+  /* own tooltip, because native title= sits there for ~1s first */
   .hm-tip { position: fixed; z-index: 40; pointer-events: none; opacity: 0;
     background: var(--ink); color: var(--bg); font-size: 12px; font-weight: 500;
     padding: 5px 9px; border-radius: 6px; white-space: nowrap;
@@ -168,8 +174,8 @@
   .hm-legend i[data-lvl="4"] { background: var(--accent); }
 
   /* ranked meters */
-  .ranked { display: grid; gap: 11px; }
-  .ranked .row { display: grid; grid-template-columns: minmax(96px, 176px) 1fr auto; align-items: center; gap: 14px; }
+  .ranked { display: grid; grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .ranked .row { display: grid; grid-template-columns: minmax(96px, 176px) minmax(0, 1fr) auto; align-items: center; gap: 14px; }
   .ranked .k { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ranked .meter { height: 8px; background: var(--chip); border-radius: 5px; overflow: hidden; }
   .ranked .meter > span { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
@@ -183,8 +189,8 @@
   .tlink:hover, .alink:hover { border-bottom-color: var(--accent); color: var(--accent); }
 
   /* For you */
-  .reclist { display: grid; gap: 2px; }
-  .rec { display: grid; grid-template-columns: 30px 1fr; gap: 16px; padding: 15px 0;
+  .reclist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .rec { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 16px; padding: 15px 0;
          border-top: 1px solid var(--line); align-items: start; }
   .rec:first-child { border-top: 0; }
   .rec .rk { font-family: var(--display); font-size: 20px; color: var(--muted); line-height: 1.3; }
@@ -196,13 +202,13 @@
   .rec .gw { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
   .rec .gw b { color: var(--muted); font-weight: 500; }
   .rec .recby { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
-  .tracklist { display: grid; gap: 0; }
+  .tracklist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
   .tracklist .t { padding: 11px 0; border-top: 1px solid var(--line); font-size: 16px; }
   .tracklist .t:first-child { border-top: 0; }
   .tracklist .t .by { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
 
-  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
-  @media (max-width: 720px) { .cols2 { grid-template-columns: 1fr; } }
+  .cols2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 34px; }
+  @media (max-width: 720px) { .cols2 { grid-template-columns: minmax(0, 1fr); } }
 
   /* tables (fixed layout so sorting can't reflow widths) */
   .scroll { overflow-x: auto; }
@@ -213,8 +219,8 @@
     position: relative; }
   table.tbl th.sortable { cursor: pointer; }
   table.tbl th.sortable:hover { color: var(--ink); }
-  /* Draggable column edge. Sits over the cell's right border. A faint grip line
-     hints it's draggable without shouting; it strengthens to the accent on hover. */
+  /* draggable column edge, sitting over the cell's right border. faint grip
+     line so it's findable without shouting, accent on hover. */
   .col-resize { position: absolute; top: 0; right: -4px; width: 9px; height: 100%; cursor: col-resize; z-index: 2; }
   .col-resize::after { content: ""; position: absolute; top: 25%; bottom: 25%; left: 4px; width: 2px;
     border-radius: 2px; background: var(--line); transition: background .12s; }
@@ -240,8 +246,8 @@
   footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted);
            font-size: 13px; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
   footer a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
-  /* Search-tips popover: an on-demand affordance, not permanent chrome. Shown
-     on hover or keyboard focus so it stays reachable without a mouse. */
+  /* search tips on demand rather than permanent chrome. hover or keyboard
+     focus, so it's reachable without a mouse. */
   .tips { position: relative; }
   .tips-btn { background: none; border: 0; padding: 0; color: var(--ink-2); font: inherit; font-weight: 400;
     cursor: help; border-bottom: 1px dotted var(--line); border-radius: 0; }
@@ -252,7 +258,7 @@
     font-size: 12.5px; line-height: 1.5; opacity: 0; visibility: hidden; transform: translateY(-4px);
     transition: opacity .13s, transform .13s, visibility .13s; }
   .tips:hover .tips-pop, .tips:focus-within .tips-pop { opacity: 1; visibility: visible; transform: translateY(0); }
-  .tips-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline;
+  .tips-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; align-items: baseline;
     margin: 9px 0; }
   .tips-grid em { font-style: normal; color: var(--muted); }
   .tips-pop code { background: var(--chip); color: var(--ink); border-radius: 3px; padding: 1px 5px;
@@ -268,8 +274,46 @@
   .modal h3 { font-family: var(--display); font-size: 26px; font-weight: 600; padding-right: 30px; }
   .modal .plays { color: var(--muted); font-size: 13.5px; margin-top: 4px; }
   .modal h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 20px 0 10px; }
-  .modal ol { padding-left: 22px; display: grid; gap: 8px; font-size: 15px; }
+  .modal ol { padding-left: 22px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: 15px; }
   .modal .lfm { display: inline-block; margin-top: 20px; color: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; }
+
+  /* phones. same layout, not a second UI - most of it already collapses on
+     its own (tabs and heatmap strip scroll, .stats auto-fits, footer wraps).
+     these are the spots where it doesn't. */
+  @media (max-width: 620px) {
+    body { padding: 0 14px 44px; overflow-wrap: break-word; }
+    nav.tabs { gap: 18px; }
+
+    /* a six-figure play count is one unbreakable word and a grid item won't
+       shrink below it, so at 42px it stretches the column and the page. */
+    .stat .n { font-size: 34px; }
+
+    /* masthead stacks: logo, then full-width search with the toggle beside it.
+       sync pill gets its own line so it can't squeeze them. */
+    .mast-r { width: 100%; flex-wrap: wrap; }
+    form.search { flex: 1; flex-wrap: wrap; }
+    form.search input { flex: 1; min-width: 0; }
+    #status:not(:empty) { order: 1; flex-basis: 100%; }
+
+    /* the popover is 88vw anchored to this span's left edge, so anywhere
+       mid-row it hangs off screen - and being absolute it widens the page even
+       while hidden. own line, so left:0 actually means left:0. */
+    .tips { flex-basis: 100%; }
+
+    /* 12 dates won't fit legibly, so show every other one. counted from the end
+       so the newest week survives whatever the history length. hidden spans
+       keep their flex slot, so labels stay over their bars. */
+    .xlabels span:nth-last-child(even) { visibility: hidden; }
+
+    /* table-layout:fixed obeys width:100%, so .scroll never actually scrolls
+       and every column ellipsises to nothing. a floor makes it scroll. */
+    table.tbl { min-width: 600px; }
+    .col-resize { display: none; }   /* mousedown only, dead weight on touch */
+
+    .ranked .row { grid-template-columns: minmax(72px, 40%) minmax(0, 1fr) auto; gap: 10px; }
+    .modal { padding: 12px; }
+    .modal-card { padding: 20px; }
+  }
 </style>
 </head>
 <body>
@@ -478,9 +522,9 @@ applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
 let currentUser = null;
 const hist = { offset: 0, search: '', sort: 'listened_at', dir: 'desc', pageSize: 50, start: null, end: null };
 
-// The browser's IANA zone (e.g. "America/New_York"), sent to /clock and
-// /scrobbles so "morning" means the listener's morning and a clicked cell
-// returns the same rows it counted. Postgres resolves DST per play.
+// browser IANA zone (e.g. "America/New_York"), sent to /clock and /scrobbles
+// so "morning" means the listener's morning and a clicked cell gives back the
+// same rows it counted. postgres resolves DST per play.
 const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
   catch (e) { return 'UTC'; } })();
 const TZ_LABEL = TZ.split('/').pop().replace(/_/g, ' ');
@@ -493,20 +537,20 @@ $('tabs').addEventListener('click', e => { const b = e.target.closest('button');
 
 const PANELS = ['report','streaks','discovery','clock','genre-clock','hours','tag-shift',
                 'loyalty','summary','binges','song-binges','recommendations'];
-// tz on EVERY panel: anything bucketing by day/week/month needs the listener's
-// zone, or a 9pm play lands on tomorrow. Panels that don't bucket ignore it.
+// tz on every panel: anything bucketing by day/week/month needs the listener's
+// zone or a 9pm play lands on tomorrow. the rest just ignore it.
 
-// Range picker: a trailing window in days, clamped server-side (0 = all time).
+// trailing window in days, clamped server side (0 = all time)
 const RANGES = [{label: '7d', days: 7}, {label: '30d', days: 30},
                 {label: '6mo', days: 182}, {label: '1y', days: 365},
                 {label: 'All', days: 0}];
-// Separate selections on purpose: the sections answer different questions, so
+// separate selections on purpose - the sections answer different questions, so
 // one shared range would make one of them wrong.
 // "loyalty" is the internal name everywhere (endpoint, query, render) because
-// the metric IS a loyalty ratio; the panel is only LABELLED "Heavy rotation".
+// the metric is a loyalty ratio. only the panel label says "Heavy rotation".
 const range = {genres: 365, binges: 7, loyalty: 7};   // section -> selected days
-// section -> the panels its picker refetches. Genres has no endpoint of its
-// own; it is summed client-side from tag-shift.
+// section -> the panels its picker refetches. genres has no endpoint of its
+// own, it's summed client side from tag-shift.
 const RANGE_PANELS = {genres: ['tag-shift'], binges: ['binges', 'song-binges'],
                       loyalty: ['loyalty']};
 
@@ -518,7 +562,7 @@ const panelQs = n => {
   return qs;
 };
 
-// Drawn from RANGES, not written in the markup, so the pickers can't drift.
+// drawn from RANGES rather than written into the markup, so they can't drift
 function drawRanges() {
   document.querySelectorAll('.ranges').forEach(box => {
     const section = box.dataset.ranges;
@@ -535,7 +579,7 @@ document.addEventListener('click', async e => {
   const section = btn.closest('.ranges').dataset.ranges;
   range[section] = Number(btn.dataset.days);
   drawRanges();
-  // Refetch only the panels this picker feeds, not the whole dashboard.
+  // refetch only the panels this picker feeds, not the whole dashboard
   const names = RANGE_PANELS[section];
   const settled = await Promise.allSettled(names.map(n => get(currentUser, n, panelQs(n))));
   const patch = {};
@@ -545,7 +589,7 @@ document.addEventListener('click', async e => {
   else renderBinges(patch['song-binges'] || [], patch.binges || []);
 });
 
-// One render path per section, so a range change and the full draw agree.
+// one render path per section, so a range change and a full draw agree
 function renderGenres(tagShift) {
   const gt = {};
   (tagShift || []).forEach(r => gt[r.tag] = (gt[r.tag] || 0) + r.plays);
@@ -573,9 +617,9 @@ function renderBinges(songBinges, binges) {
   ).join('') || emptyMsg('no album bursts in this range');
 }
 
-// Fetch every panel at once. allSettled so one slow or empty section can't
-// blank the dashboard -- it matters more now that reads no longer wait for the
-// sync, because early panels legitimately come back thin.
+// fetch every panel at once. allSettled so one slow or empty section can't
+// blank the dashboard - matters more now reads don't wait on the sync, since
+// early panels come back thin for real reasons.
 async function fetchPanels(user) {
   const settled = await Promise.allSettled(PANELS.map(n => get(user, n, panelQs(n))));
   if (settled.every(r => r.status === 'rejected')) throw new Error(settled[0].reason.message);
@@ -584,25 +628,25 @@ async function fetchPanels(user) {
   return { d, failed: settled.filter(r => r.status === 'rejected').length };
 }
 
-// While the background pull runs, poll for progress and redraw once it lands.
-// The reads themselves never block (see routers/analytics.py _prepare), so this
-// is what turns "frozen spinner" into a live count.
+// while the background pull runs, poll for progress and redraw when it lands.
+// reads never block (routers/analytics.py _prepare), so this is what turns a
+// frozen spinner into a live count.
 let syncPoll = null;
 async function watchSync(user) {
   clearInterval(syncPoll); syncPoll = null;
   const stop = () => { clearInterval(syncPoll); syncPoll = null; };
   let lastPhase = 'init';  // redraw the dashboard on each phase change, not every tick
 
-  // Returns true while the pull is still running (keep polling), false once
-  // it's done or the user switched away.
+  // true while the pull is still going (keep polling), false once it's done or
+  // the user switched away
   const tick = async () => {
     if (user !== currentUser) return false;
     let s;
     try { s = await fetch(`${API}/sync/${enc(user)}/status`).then(r => r.json()); }
     catch { return true; }  // transient; try again on the next tick
     const phase = s.syncing ? (s.phase || 'pulling') : 'done';
-    // On any stage change refresh the panels so charts fill in as data lands
-    // (scrobbles done -> full charts; enrichment done -> hours & genres).
+    // on any stage change redraw, so charts fill in as data lands
+    // (scrobbles done -> full charts, enrichment done -> hours & genres)
     if (phase !== lastPhase) {
       lastPhase = phase;
       try { const { d } = await fetchPanels(user); if (user === currentUser) { render(d); loadScrobbles(); } }
@@ -617,8 +661,8 @@ async function watchSync(user) {
       $('status').textContent = 'almost there: adding genres and play lengths in the background';
       return true;
     }
-    // Done for now. last_synced_at null means the full pull didn't finish; the
-    // data shown is partial and the background job will retry on its own.
+    // done for now. null last_synced_at means the pull didn't finish, so what's
+    // shown is partial and the background job retries on its own.
     $('status').textContent = s.last_synced_at
       ? '' : 'sync didn’t finish; showing what loaded so far, it will keep trying.';
     return false;
@@ -634,10 +678,10 @@ $('form').addEventListener('submit', async e => {
   if (!user) return;
   $('status').textContent = 'loading…';
   try {
-    // The one place that waits on the sync: it blocks up to the server's budget
-    // so the first paint has data. A 404 here means Last.fm doesn't know the
-    // handle (validated before any row is created), so surface it plainly and
-    // stop -- don't fall through to a dashboard full of empty panels.
+    // the one place that waits on the sync, blocking up to the server's budget
+    // so the first paint has something. a 404 means Last.fm doesn't know the
+    // handle (checked before any row is created) - say so and stop, don't fall
+    // through to a dashboard of empty panels.
     const res = await fetch(`${API}/sync/${enc(user)}`, {method: 'POST'});
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -662,9 +706,9 @@ $('form').addEventListener('submit', async e => {
   } catch (err) { $('status').textContent = 'could not load: ' + err.message; }
 });
 
-// Recommendation match display. Tag-cosine rarely clears ~0.5 even for a great
-// fit, so these bands are calibrated to that reality, not to a naive 0-100 read
-// where everything looks like a poor match. Heuristic, tune freely.
+// match display. tag-cosine rarely clears ~0.5 even for a great fit, so the
+// bands are set against that, not a naive 0-100 read where everything looks
+// bad. heuristic, tune freely.
 const MATCH_FULL = 0.5;  // cosine treated as a full bar; the meter is a fraction of this
 const matchLabel = s => s >= 0.40 ? 'strong' : s >= 0.28 ? 'solid' : s >= 0.16 ? 'moderate' : 'loose';
 
@@ -708,10 +752,10 @@ function render(d) {
   const gw = {};
   recs.songs_from_new_artists.forEach(s => (gw[s.artist_name] = gw[s.artist_name] || []).push(s.track_name));
   $('recs').innerHTML = recs.artists.map((a, i) => {
-    // Absolute cosine (0-1), NOT scaled to the batch's best. The old "% match"
-    // divided by the top score, so the #1 pick was always 100% even when the
-    // whole batch was weak. Now the bar is a fraction of MATCH_FULL (a fixed
-    // "strong tag match"), and the label is the honest similarity band + value.
+    // absolute cosine (0-1), not scaled to the batch best. the old "% match"
+    // divided by the top score, so #1 was always 100% even when the whole batch
+    // was weak. now the bar is a fraction of MATCH_FULL and the label is the
+    // real band + value.
     const pct = Math.min(100, Math.round(100 * a.score / MATCH_FULL));
     const tracks = (gw[a.artist_name] || []).slice(0, 3);
     const gwHtml = tracks.length
@@ -723,8 +767,8 @@ function render(d) {
       ${gwHtml}</div></div>`;
   }).join('') || emptyMsg('recommendations are computed on a schedule, check back shortly');
 
-  // Same numbered .rec skeleton as "Artists to explore" so the two For-you
-  // columns read as one design: rank, a title line, a muted sub-line.
+  // same numbered .rec skeleton as "Artists to explore" so both For-you columns
+  // read as one thing: rank, title line, muted sub-line
   $('deepcuts').innerHTML = recs.songs_from_favorites.map((s, i) => `
     <div class="rec"><div class="rk">${String(i + 1).padStart(2, '0')}</div><div>
       <div class="name">${trackLink(s.artist_name, s.track_name)}</div>
@@ -748,29 +792,30 @@ function barChart(barsId, labelsId, rows, valOf) {
   $(labelsId).innerHTML = rows.map(r => `<span>${esc(fmtWeek(r.month))}</span>`).join('');
 }
 
-// Must match PART_NAMES in queries/analytics.py: the cell a user clicks becomes
-// a date:/part: search and the backend re-derives the same buckets. Index order.
+// must match PART_NAMES in queries/analytics.py, index order included: a
+// clicked cell becomes a date:/part: search and the backend rebuilds the same
+// buckets.
 const PARTS = ['night', 'morning', 'afternoon', 'evening'];
 const PART_HOURS = ['12-6am', '6am-12pm', '12-6pm', '6pm-12am'];
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-// Continuous counts -> 5 discrete levels (0=empty, then quartered against the
-// busiest cell), the contributions-graph convention.
+// counts -> 5 levels (0 = empty, then quartered against the busiest cell), the
+// contributions-graph convention
 const heatLevel = (n, max) => n <= 0 ? 0 : Math.min(4, 1 + Math.floor((n / max) * 3.999));
 
 let lastClockRows = null;  // cached so a window resize can rescale without a refetch
 
 function drawClock(rows) {
   lastClockRows = rows;
-  // rows: {day: 'YYYY-MM-DD', part: 0-3, plays}. Only non-empty (day,part) come
-  // back; the grid below fills every day in the span so gaps stay visible.
+  // rows: {day: 'YYYY-MM-DD', part: 0-3, plays}. only non-empty (day,part) come
+  // back, the grid below fills in every day so gaps stay visible.
   const byCell = {}; let cmax = 1;
   rows.forEach(r => { byCell[r.day + '|' + r.part] = r.plays; cmax = Math.max(cmax, r.plays); });
 
-  // Walk every calendar day from the first with plays to today, so idle days
-  // are empty columns rather than missing ones (a real gap in the timeline).
+  // walk every day from the first with plays to today, so idle days are empty
+  // columns instead of missing ones
   const dates = Object.keys(byCell).map(k => k.split('|')[0]).sort();
   if (!dates.length) { $('clock').innerHTML = emptyMsg('no plays yet'); return; }
   const start = new Date(dates[0] + 'T00:00:00'), today = new Date(isoDate(new Date()) + 'T00:00:00');
@@ -780,8 +825,8 @@ function drawClock(rows) {
   const rowLabels = PARTS.map((p, i) =>
     `<span title="${PART_HOURS[i]}">${p}</span>`).join('');
 
-  // Month ruler: label a column only where its month changes, so "Jun … Jul"
-  // sits above the first day of each month.
+  // month ruler: label a column only where the month changes, so "Jun ... Jul"
+  // sits above the first day of each
   let lastMonth = -1;
   const months = cols.map(d => {
     const m = d.getMonth(), show = m !== lastMonth; lastMonth = m;
@@ -800,15 +845,15 @@ function drawClock(rows) {
     return `<div class="hm-col">${cells}</div>`;
   }).join('');
 
-  // Size cells to fill the width for a short history, cap (and scroll) for a
-  // long one, so 7 weeks don't sit as a small strip in an empty container. 58px
-  // row-label column + 8px gap + 3px between columns.
+  // size cells to fill the width on a short history, cap (and scroll) on a long
+  // one, so 7 weeks aren't a small strip in an empty container. 58px row-label
+  // column + 8px gap + 3px between columns.
   const GAP = 3, ROWLABELS = 58 + 8, MIN = 13, MAX = 30;
   const avail = ($('clock').clientWidth || 900) - ROWLABELS;
   const fit = Math.floor((avail - (cols.length - 1) * GAP) / cols.length);
   const hc = Math.max(MIN, Math.min(MAX, fit));
-  // Even at the max cell size a tiny history won't fill the row: center it then,
-  // rather than leaving it stranded against the left edge.
+  // even at max cell size a tiny history won't fill the row, so center it
+  // rather than leave it stranded on the left
   const naturalW = cols.length * hc + (cols.length - 1) * GAP;
   const center = naturalW < avail ? 'justify-content:center' : '';
 
@@ -819,23 +864,22 @@ function drawClock(rows) {
     </div>
     <div class="hm-legend">Less <i data-lvl="1"></i><i data-lvl="2"></i><i data-lvl="3"></i><i data-lvl="4"></i> More</div>`;
   $('clock-cap').textContent = `by day & part of day · ${TZ_LABEL}`;
-  // Pin to the newest day only when the strip actually overflows; a centered,
-  // non-scrolling strip has nowhere to go and would otherwise jump.
+  // pin to the newest day only when the strip actually overflows. a centered
+  // one has nowhere to go and would just jump.
   if (!center) { const sc = $('clock').querySelector('.hm-scroll'); if (sc) sc.scrollLeft = sc.scrollWidth; }
 }
 
-// Genre routine: the aggregate weekday x part grid, one cell per slot, showing
-// the genre that slot is most made of. Sibling to the listening clock above it,
-// deliberately a different question: the clock is one column per REAL date and
-// answers "what did I do on the 14th", this collapses every Friday evening you
-// have ever had into one square and answers "what is a Friday evening for me".
-// Same buckets either way, so the two line up conceptually.
+// genre routine: weekday x part grid, one cell per slot, showing the genre that
+// slot is mostly made of. sibling to the listening clock but a different
+// question on purpose - the clock is one column per real date ("what did I do
+// on the 14th"), this collapses every Friday evening you've ever had into one
+// square ("what is a Friday evening for me"). same buckets either way.
 function drawGenreClock(rows) {
   const box = $('genre-clock');
   if (!rows.length) { box.innerHTML = emptyMsg('no genre data yet'); return; }
 
-  // rows are (weekday, part, tag, plays), already ordered plays DESC within a
-  // cell, so the first tag seen for a cell is its dominant one.
+  // rows are (weekday, part, tag, plays), already ordered plays desc within a
+  // cell, so the first tag seen for a cell is the dominant one
   const cells = {};
   let cmax = 1;
   rows.forEach(r => {
@@ -853,9 +897,9 @@ function drawGenreClock(rows) {
     const row = WEEKDAY.map((dayName, wd) => {
       const c = cells[wd + '|' + pi];
       if (!c) return `<button class="gm-cell" type="button" data-lvl="0" disabled></button>`;
-      // "tagged" on purpose: this grid inner-joins to primary_tag, so an
-      // untagged artist's plays are absent here but WILL show in the rows a
-      // click lands on. ~1% of plays, but the label shouldn't overstate.
+      // "tagged" on purpose - this grid inner-joins primary_tag, so an untagged
+      // artist's plays are missing here but do show up in the rows a click
+      // lands on. ~1% of plays, but the label shouldn't overstate.
       const tip = `${dayName} · ${part} (${PART_HOURS[pi]}) · ${c.total} tagged play${c.total === 1 ? '' : 's'} · ${c.tags.join(', ')}`;
       return `<button class="gm-cell" type="button" data-lvl="${heatLevel(c.total, cmax)}"
         data-day="${dayName}" data-part="${part}" data-tip="${esc(tip)}">${esc(c.top.tag)}</button>`;
@@ -865,9 +909,9 @@ function drawGenreClock(rows) {
   box.innerHTML = `<div class="gm">${head}${body}</div>`;
 }
 
-// Same jump-to-Scrobbles behaviour as the listening clock, but filtered by
-// WEEKDAY rather than a date: day: and part: are existing search terms, so the
-// rows you land on are exactly the ones the cell counted.
+// same jump-to-Scrobbles as the listening clock but filtered by weekday, not a
+// date. day: and part: already exist as search terms, so you land on exactly
+// the rows the cell counted.
 $('genre-clock').addEventListener('click', e => {
   const cell = e.target.closest('.gm-cell[data-day]');
   if (!cell || cell.dataset.lvl === '0') return;
@@ -878,7 +922,7 @@ $('genre-clock').addEventListener('click', e => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
-// Rescale the heatmap on resize (debounced) so cells keep filling the width.
+// rescale the heatmap on resize (debounced) so cells keep filling the width
 let clockResize = null;
 window.addEventListener('resize', () => {
   if (!lastClockRows) return;
@@ -886,8 +930,8 @@ window.addEventListener('resize', () => {
   clockResize = setTimeout(() => drawClock(lastClockRows), 150);
 });
 
-// Fast heatmap tooltip: one reused element, shown on hover with no delay (the
-// native title= tooltip waits ~1s). Positioned above the hovered cell.
+// one reused tooltip element, shown on hover with no delay (native title= waits
+// ~1s). sits above the hovered cell.
 const hmTip = document.createElement('div');
 hmTip.className = 'hm-tip';
 document.body.appendChild(hmTip);
@@ -904,10 +948,10 @@ document.body.addEventListener('mouseover', e => {
 document.body.addEventListener('mouseout', e => {
   if (e.target.closest(TIP_CELL)) hmTip.classList.remove('on');
 });
-// The strip scrolls, so hide the tip on scroll rather than let it drift.
+// the strip scrolls, so hide the tip rather than let it drift
 $('clock').addEventListener('scroll', () => hmTip.classList.remove('on'), true);
 
-// Clicking a block jumps to Scrobbles pre-filtered to exactly that day + part.
+// clicking a block jumps to Scrobbles pre-filtered to that day + part
 $('clock').addEventListener('click', e => {
   const cell = e.target.closest('.hm-cell[data-date]');
   if (!cell || cell.dataset.lvl === '0') return;
@@ -985,9 +1029,9 @@ $('scrob-filter').addEventListener('click', e => {
   }
 });
 
-// scrobble history. Column widths live here (percent) so they survive every
-// sort and page reload -- the thead is rebuilt each load and reads from colW.
-// Defaults: When is narrow (dates are short) and the rest sit left of it.
+// scrobble history. column widths live here as percents so they survive sorts
+// and reloads - the thead is rebuilt each load and reads colW. When is narrow
+// (dates are short), the rest sit left of it.
 const HIST_COLS = [['listened_at', 'When'], ['track_name', 'Track'],
                    ['artist_name', 'Artist'], ['album_name', 'Album']];
 const colW = { listened_at: 18, track_name: 34, artist_name: 28, album_name: 20 };
@@ -1002,7 +1046,7 @@ async function loadScrobbles() {
   const rows = data.rows, total = data.total;
   const head = '<thead><tr>' + HIST_COLS.map(([k, label], idx) => {
     const arr = hist.sort === k ? (hist.dir === 'asc' ? ' ↑' : ' ↓') : '';
-    // Every column but the last gets a drag handle on its right edge.
+    // every column but the last gets a drag handle on its right edge
     const grip = idx < HIST_COLS.length - 1 ? `<span class="col-resize" data-col="${k}"></span>` : '';
     return `<th class="sortable" data-key="${k}" style="width:${colW[k]}%">${label}${arr}${grip}</th>`;
   }).join('') + '</tr></thead>';
@@ -1013,8 +1057,8 @@ async function loadScrobbles() {
       <td class="sub">${esc(r.album_name)}</td></tr>`).join('')}</tbody>`
     : '<tbody><tr><td class="sub">no matches</td></tr></tbody>';
   $('scrobbles').innerHTML = head + body;
-  // Real total, so the range is honest and Next knows exactly where the end is
-  // (a full last page used to leave Next enabled onto an empty one).
+  // real total, so the range is honest and Next knows where the end is. a full
+  // last page used to leave Next enabled onto an empty one.
   $('scrob-range').textContent = total
     ? `${(hist.offset + 1).toLocaleString()}-${(hist.offset + rows.length).toLocaleString()} of ${total.toLocaleString()}`
     : 'no matches';
@@ -1022,8 +1066,8 @@ async function loadScrobbles() {
   $('next').disabled = hist.offset + rows.length >= total;
 }
 
-// Drag a column edge to resize. The dragged column and its right neighbour
-// trade width so the table always sums to 100% and nothing else jumps.
+// drag a column edge to resize. the dragged column and its right neighbour
+// trade width, so the table stays at 100% and nothing else jumps.
 let resizing = null;
 $('scrobbles').addEventListener('mousedown', e => {
   const grip = e.target.closest('.col-resize');
@@ -1071,9 +1115,9 @@ $('scrob-form').addEventListener('submit', e => {
 $('prev').addEventListener('click', () => { hist.offset = Math.max(0, hist.offset - hist.pageSize); loadScrobbles(); });
 $('next').addEventListener('click', () => { hist.offset += hist.pageSize; loadScrobbles(); });
 
-// Rows-per-page toggle. 200 is the server's clamp (routers/analytics.py), so
-// there's no point offering more. Jumping back to offset 0 keeps the range
-// label truthful -- switching size mid-scroll would land on an arbitrary row.
+// rows per page. 200 is the server clamp (routers/analytics.py) so there's no
+// point offering more. jumping back to offset 0 keeps the range label honest,
+// switching size mid-scroll would land on an arbitrary row.
 function setPageSize(size) {
   hist.pageSize = size; hist.offset = 0;
   document.querySelectorAll('.pagesize').forEach(b =>
@@ -1099,7 +1143,7 @@ $('compat-form').addEventListener('submit', async e => {
       : `could not compare: ${err.message}`;
     $('compat').innerHTML = `<span class="sub">${esc(msg)}</span>`; return;
   }
-  // Genres need the tag backfill, still running right after a first-time pull.
+  // genres need the tag backfill, still running right after a first pull
   const pending = c.pending
     ? `<div class="note" style="margin-bottom:16px">Still pulling ${esc(other)}'s history in the background. Artists match now; genres and the score fill in shortly, so compare again in a moment for the full picture.</div>`
     : '';
