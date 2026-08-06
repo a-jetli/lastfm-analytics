@@ -253,10 +253,11 @@ def _widen_candidate_pool() -> None:
     haven't played", and with one user that set is empty by construction. On the
     live box it produced exactly one recommendation.
 
-    Per user: take their top SEED_ARTISTS, ask Last.fm for SIMILAR_PER_ARTIST
-    similar artists each, drop everything already known, fetch tags for the rest.
-    The new rows are artist_tags only with no scrobbles attached, which is what
-    makes them recommendable rather than already played.
+    Per user: take their top SEED_ARTISTS plus any artist they explicitly asked
+    for more of, ask Last.fm for SIMILAR_PER_ARTIST similar artists each, drop
+    everything already known, fetch tags for the rest. The new rows are
+    artist_tags only with no scrobbles attached, which is what makes them
+    recommendable rather than already played.
 
     Cost is bounded and shrinks. The work list is filtered by NOT EXISTS, so a
     user's first pass fetches up to SEED_ARTISTS * SIMILAR_PER_ARTIST names and
@@ -269,12 +270,24 @@ def _widen_candidate_pool() -> None:
 
     for user_id in user_ids:
         with db.get_connection() as conn, conn.cursor() as cur:
-            # skip users the pool already serves. without this the 10 getSimilar
-            # calls below repeat every tick, per user, forever, learning nothing:
-            # the tag fetches stop (NOT EXISTS) but the seed lookups don't.
-            if len(recommend_queries.get_recommendations(cur, user_id)) >= RECOMMEND_TOP_N:
+            # a "more like this" the pass hasn't looked up yet is always worth a
+            # call, however full the list already is - it's the user asking for a
+            # direction the play history doesn't point in.
+            pending = recommend_queries.get_pending_seeds(cur, user_id)
+            # otherwise skip users the pool already serves. without this the 10
+            # getSimilar calls below repeat every tick, per user, forever,
+            # learning nothing: the tag fetches stop (NOT EXISTS) but the seed
+            # lookups don't.
+            if not pending and (
+                len(recommend_queries.get_recommendations(cur, user_id)) >= RECOMMEND_TOP_N
+            ):
                 continue
-            seeds = recommend_queries.get_top_artists(cur, user_id)
+            # dict.fromkeys-style dedupe on lowercase: a seed that's also a top
+            # artist is one lookup, not two
+            seeds = list({
+                name.lower(): name
+                for name in pending + recommend_queries.get_top_artists(cur, user_id)
+            }.values())
 
         similar: list[str] = []
         for seed in seeds:
@@ -313,6 +326,9 @@ def _widen_candidate_pool() -> None:
                     sync_queries.insert_artist_tag(cur, artist_name, "", 0)
                 conn.commit()
                 time.sleep(PAGE_PAUSE_SECONDS)
+            # stamped after the lookups, so a crash mid-pass retries them
+            recommend_queries.mark_seeds_expanded(cur, user_id)
+            conn.commit()
 
 
 def _backfill_durations(user_id: int | None = None) -> None:
@@ -364,7 +380,11 @@ def _refresh_recommendations() -> None:
 
     The shared work (corpus load, idf, all artist vectors) happens once and gets
     reused for every user. Only the taste vector and ranking are per-user. Math
-    lives in app/recommender.py."""
+    lives in app/recommender.py.
+
+    Explicit feedback folds into the two inputs the math already takes: a seed
+    joins the play scores, a block joins the exclusion set. No special case in
+    the recommender itself."""
     with db.get_connection() as conn, conn.cursor() as cur:
         corpus_rows = recommend_queries.get_tag_corpus(cur)
         if not corpus_rows:
@@ -384,11 +404,23 @@ def _refresh_recommendations() -> None:
             user_vector = recommender.build_user_vector(plays, artist_vectors)
             if not user_vector:
                 continue  # no tagged artists yet, skip and leave the cache
+            seeds = recommend_queries.get_feedback_names(cur, user_id, "seed")
+            blocked = recommend_queries.get_feedback_names(cur, user_id, "block")
+            # seeds are picks, not plays, so they carry equal weight rather than
+            # a count. same builder as the taste vector, so recommend() is
+            # comparing like with like.
+            seed_vector = (
+                recommender.build_user_vector({name: 1.0 for name in seeds}, artist_vectors)
+                if seeds else None
+            )
             ranked = recommender.recommend(
                 user_vector,
                 artist_vectors,
-                already_played=set(plays),
+                # a seeded artist is excluded from its own results: they've
+                # already told us they like it
+                already_played=set(plays) | set(seeds) | set(blocked),
                 k=RECOMMEND_TOP_N,
+                seed_vector=seed_vector,
             )
             recommend_queries.replace_recommendations(cur, user_id, ranked)
             conn.commit()  # per user, so a crash keeps earlier users' results

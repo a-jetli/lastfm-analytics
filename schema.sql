@@ -159,3 +159,24 @@ CREATE TABLE recommendations (
     computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, artist_name)
 );
+
+-- Explicit taste feedback, the only place a user's opinion (rather than their
+-- play history) enters the recommender.
+--   'block' -- never recommend this artist, and never seed similars off it
+--   'seed'  -- treat it like a most-played artist and go find more like it
+-- Read by sync_service._refresh_recommendations (taste vector + exclusion set)
+-- and _widen_candidate_pool (which artists to ask Last.fm about).
+CREATE TABLE artist_feedback (
+    user_id     INTEGER REFERENCES users(id) NOT NULL,
+    artist_name TEXT NOT NULL,
+    verdict     TEXT NOT NULL CHECK (verdict IN ('block', 'seed')),
+    -- when the similar-artist lookup last ran for this seed. NULL = pending.
+    -- Without it a seed would re-fetch its similars every pass forever, since
+    -- the tag inserts are NOT EXISTS filtered but the lookups aren't.
+    expanded_at TIMESTAMPTZ
+);
+-- lower(), because the same artist reaches this table from two sources that
+-- disagree on casing (scrobbles vs the recommendations cache), the same split
+-- that once put artists a user already played back into their own list.
+CREATE UNIQUE INDEX idx_artist_feedback_key
+    ON artist_feedback (user_id, lower(artist_name));

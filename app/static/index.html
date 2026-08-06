@@ -74,8 +74,21 @@
   #landing a:hover { border-bottom-color: var(--accent); }
   #landing .hint { color: var(--muted); font-size: 14px; margin-top: 26px; }
 
+  /* Scroll containers that exist to slide sideways on a narrow screen, never to
+     be scrolled by the bar itself. macOS with a mouse attached reserves layout
+     space for a permanent bar, which on the tab strip is a stray vertical line
+     and under the heatmap is a grey slab eating a row of cells. Wheel, trackpad
+     and touch all still work.
+     overflow-y:hidden on the tab strip is load-bearing: with overflow-x:auto and
+     overflow-y left at visible, CSS promotes the y axis to auto too, which is
+     where that vertical bar came from in the first place. */
+  nav.tabs, .hm-scroll, .scroll { scrollbar-width: none; }
+  nav.tabs::-webkit-scrollbar, .hm-scroll::-webkit-scrollbar,
+  .scroll::-webkit-scrollbar { display: none; }
+
   /* tabs */
-  nav.tabs { display: flex; gap: 24px; overflow-x: auto; border-bottom: 1px solid var(--line); margin: 20px 0 28px; }
+  nav.tabs { display: flex; gap: 24px; overflow-x: auto; overflow-y: hidden;
+             border-bottom: 1px solid var(--line); margin: 20px 0 28px; }
   nav.tabs button { background: none; color: var(--muted); border: 0; border-radius: 0; padding: 12px 1px;
                     font-weight: 600; font-size: 14px; white-space: nowrap;
                     border-bottom: 2px solid transparent; margin-bottom: -1px; }
@@ -124,9 +137,22 @@
   .hm { display: flex; gap: 8px; font-size: 10px; color: var(--muted); --hc: 13px; }
   .hm-rowlabels { display: flex; flex-direction: column; gap: 3px; flex: none; width: 58px; padding-top: 16px; }
   .hm-rowlabels span { height: var(--hc); line-height: var(--hc); white-space: nowrap; text-align: right; }
-  .hm-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; flex: 1; }
+  .hm-scroll { overflow-x: auto; overflow-y: hidden; flex: 1; scroll-behavior: smooth; }
+  /* the strip pins to today on draw, so the oldest months start out scrolled off
+     the left edge. these are the only way back now the scrollbar is hidden, and
+     they only render when the strip actually overflows. */
+  .hm-arrow { flex: none; align-self: stretch; width: 20px; margin-top: 16px;
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    color: var(--muted); font-size: 13px; line-height: 1; padding: 0; cursor: pointer; }
+  .hm-arrow:hover { color: var(--ink); border-color: var(--muted); }
+  .hm-arrow:disabled { opacity: .3; cursor: default; }
   .hm-months { display: flex; gap: 3px; height: 16px; }
-  .hm-months span { flex: none; white-space: nowrap; }
+  /* one span per day column at exactly the column's width, so a label sits over
+     the first day of its month. Sized to content it collapsed empty spans to 0
+     and the ruler drifted further off the grid with every month. The name is
+     wider than one cell and is allowed to overflow to the right, into the empty
+     spans that follow it. */
+  .hm-months span { flex: none; width: var(--hc); white-space: nowrap; }
   .hm-days { display: flex; gap: 3px; }
   .hm-col { display: flex; flex-direction: column; gap: 3px; flex: none; }
   .hm-cell { width: var(--hc); height: var(--hc); border-radius: 2px; border: 0; padding: 0;
@@ -202,6 +228,30 @@
   .rec .gw { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
   .rec .gw b { color: var(--muted); font-weight: 500; }
   .rec .recby { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
+
+  /* the seed box is a control for the panel, not the page's main search, so it
+     sits quieter than the masthead one and stretches to the column */
+  .seedform { margin-bottom: 2px; }
+  .seedform input { flex: 1; min-width: 0; font-size: 14px; padding: 7px 11px; }
+  .seedform button { padding: 7px 14px; font-size: 14px; }
+
+  /* feedback controls: same quiet outline as the range pickers, so they read as
+     controls rather than as part of the recommendation */
+  .fb { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+  .fb button { background: none; color: var(--muted); font-size: 12px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 9px; line-height: 1.5; }
+  .fb button:hover { color: var(--ink); border-color: var(--muted); }
+  .fb button.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+  .fb .done { color: var(--muted); font-size: 12px; align-self: center; }
+  /* the tuning list: what the recommender has been told, and the only way back */
+  .tune { display: flex; flex-wrap: wrap; gap: 7px; }
+  .tune span { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px;
+    background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 3px 5px 3px 12px; }
+  .tune span b { font-weight: 600; color: var(--muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .4px; }
+  .tune button { background: none; border: 0; color: var(--muted); font-size: 15px;
+    line-height: 1; padding: 0 5px; cursor: pointer; border-radius: 999px; }
+  .tune button:hover { color: var(--accent); }
   .tracklist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
   .tracklist .t { padding: 11px 0; border-top: 1px solid var(--line); font-size: 16px; }
   .tracklist .t:first-child { border-top: 0; }
@@ -358,30 +408,34 @@
         <div class="stat"><div class="n" id="t-artists"></div><div class="l">artists played</div></div>
       </div>
       <section class="block">
-        <div class="head"><h3>Plays</h3><span class="cap">by week, last 12</span></div>
+        <div class="head"><h3>Plays</h3><span class="cap" id="bars-cap"></span>
+          <div class="ranges" data-periods="report"></div></div>
         <div class="chart" id="bars"></div>
         <div class="xlabels" id="bar-labels"></div>
-        <div class="note">Click a bar to see that week's scrobbles.</div>
+        <div class="note" id="bars-note"></div>
       </section>
       <section class="block">
-        <div class="head"><h3>Listening clock</h3><span class="cap" id="clock-cap">by day &amp; part of day</span></div>
+        <div class="head"><h3>Listening clock</h3><span class="cap" id="clock-cap">by day &amp; part of day</span>
+          <div class="ranges" data-ranges="clock"></div></div>
         <div class="clock" id="clock"></div>
-        <div class="sub" style="margin-top:10px">A heatmap of your recent listening history. Each column is a day. Click any block to see those plays in Scrobbles.</div>
+        <div class="sub" style="margin-top:10px">A heatmap of your listening history over the range above. Each column is a day. Click any block to see those plays in Scrobbles.</div>
       </section>
       <section class="block">
-        <div class="head"><h3>Genre routine</h3><span class="cap">what a typical week sounds like</span></div>
+        <div class="head"><h3>Genre routine</h3><span class="cap">what a typical week sounds like</span>
+          <div class="ranges" data-ranges="routine"></div></div>
         <div id="genre-clock"></div>
         <div class="sub" style="margin-top:10px">Click any block to see those plays in Scrobbles.</div>
-        <div class="note">Your most listened to genre tags by day and time, covering all history. Tags are user defined but filtered for relevance.</div>
+        <div class="note">Your most listened to genre tags by day and time, over the range above. Tags are user defined but filtered for relevance.</div>
       </section>
     </section>
 
     <section class="panel" data-panel="trends" hidden>
       <section class="block">
-        <div class="head"><h3>Listening hours</h3><span class="cap">by week, last 12</span></div>
+        <div class="head"><h3>Listening hours</h3><span class="cap" id="hbars-cap"></span>
+          <div class="ranges" data-periods="hours"></div></div>
         <div class="chart" id="hbars"></div>
         <div class="xlabels" id="hbar-labels"></div>
-        <div class="note">Click a bar for that week. Numbers are likely slightly lower than reality, since Last.fm has no stored length for some tracks, which count as zero.</div>
+        <div class="note" id="hbars-note"></div>
       </section>
       <section class="block">
         <div class="head"><h3>Month by month</h3><span class="cap">plays, discoveries, hours and top genre</span></div>
@@ -417,13 +471,26 @@
       <div class="cols2">
         <section class="block">
           <div class="head"><h3>Artists to explore</h3></div>
-          <div class="reclist" id="recs"></div>
+          <form class="search seedform" id="seed-form">
+            <input id="seed-input" list="seed-list" autocomplete="off"
+                   placeholder="add an artist you want more like">
+            <datalist id="seed-list"></datalist>
+            <button>Add</button>
+          </form>
+          <div class="note" style="margin-top:8px">Type any artist, or pick one you've played from the suggestions.</div>
+          <div class="reclist" id="recs" style="margin-top:18px"></div>
+          <div class="note">Rate one and the next rebuild takes it into account. "More like this" also sends us looking for artists similar to it.</div>
         </section>
         <section class="block">
           <div class="head"><h3>From your favourites</h3><span class="cap">popular tracks you haven't played</span></div>
           <div class="reclist" id="deepcuts"></div>
         </section>
       </div>
+      <section class="block" id="tune-block" hidden>
+        <div class="head"><h3>Tuning</h3><span class="cap">what you've told the recommender</span></div>
+        <div class="tune" id="tune"></div>
+        <div class="note">Removing one puts that artist back to being judged on your plays alone. Lists rebuild on a schedule, so changes show up on the next pass.</div>
+      </section>
     </section>
 
     <section class="panel" data-panel="compare" hidden>
@@ -507,9 +574,19 @@ const artistBtn = n => `<button class="artist" data-name="${esc(n)}">${esc(n)}</
 const genreBtn = t => `<button class="genre" data-genre="${esc(t)}">${esc(t)}</button>`;
 const trackLink = (a, t) => `<a class="tlink" href="${lfmTrack(a, t)}" target="_blank" rel="noopener">${esc(t)}</a>`;
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const fmtWeek = s => { const [y, m, d] = String(s).split('-'); return `${MONTHS[+m - 1]} ${+d}`; };
+// a bucket start ('YYYY-MM-DD') as a label. a month bucket is always the 1st, so
+// showing the day would just print "Jun 1" twelve times.
+const fmtBucket = (s, p) => { const [y, m, d] = String(s).split('-');
+  return p === 'month' ? `${MONTHS[+m - 1]} ${y}` : `${MONTHS[+m - 1]} ${+d}`; };
 const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt = new Date(y, m - 1, d + n);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`; };
+// exclusive end of a bucket, for the scrobble drill-down. months vary in length,
+// so step the month rather than adding a fixed number of days.
+const bucketEnd = (s, p) => {
+  if (p !== 'month') return addDays(s, 7);
+  const [y, m] = s.split('-').map(Number);
+  return `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+};
 const emptyMsg = t => `<div class="sub">${t}</div>`;
 
 // theme
@@ -520,7 +597,10 @@ $('theme-toggle').addEventListener('click', () =>
 applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
 
 let currentUser = null;
-const hist = { offset: 0, search: '', sort: 'listened_at', dir: 'desc', pageSize: 50, start: null, end: null };
+// `label` is what the filter bar says for a start/end range, set when the drill
+// -down happens rather than derived later, since bar buckets vary in width
+const hist = { offset: 0, search: '', sort: 'listened_at', dir: 'desc', pageSize: 50,
+               start: null, end: null, label: '' };
 
 // browser IANA zone (e.g. "America/New_York"), sent to /clock and /scrobbles
 // so "morning" means the listener's morning and a clicked cell gives back the
@@ -541,33 +621,63 @@ const PANELS = ['report','streaks','discovery','clock','genre-clock','hours','ta
 // zone or a 9pm play lands on tomorrow. the rest just ignore it.
 
 // trailing window in days, clamped server side (0 = all time)
-const RANGES = [{label: '7d', days: 7}, {label: '30d', days: 30},
+const RANGES = [{label: '7d', days: 7}, {label: '30d', days: 30}, {label: '90d', days: 90},
                 {label: '6mo', days: 182}, {label: '1y', days: 365},
                 {label: 'All', days: 0}];
 // separate selections on purpose - the sections answer different questions, so
 // one shared range would make one of them wrong.
 // "loyalty" is the internal name everywhere (endpoint, query, render) because
 // the metric is a loyalty ratio. only the panel label says "Heavy rotation".
-const range = {genres: 365, binges: 7, loyalty: 7};   // section -> selected days
+const range = {genres: 365, binges: 7, loyalty: 7, clock: 365, routine: 0};
 // section -> the panels its picker refetches. genres has no endpoint of its
 // own, it's summed client side from tag-shift.
 const RANGE_PANELS = {genres: ['tag-shift'], binges: ['binges', 'song-binges'],
-                      loyalty: ['loyalty']};
+                      loyalty: ['loyalty'], clock: ['clock'], routine: ['genre-clock']};
+// section -> how to redraw it from the panels above. keeps the click handler
+// from growing a branch per section.
+const RANGE_RENDER = {
+  genres: p => renderGenres(p['tag-shift'] || []),
+  loyalty: p => renderLoyalty(p.loyalty || []),
+  binges: p => renderBinges(p['song-binges'] || [], p.binges || []),
+  clock: p => drawClock(p.clock || []),
+  routine: p => drawGenreClock(p['genre-clock'] || []),
+};
+
+// bucket size for the two bar charts, the other axis of "show me this by month".
+// same endpoints, same picker chrome, different question: RANGES ask how far
+// back, PERIODS ask how coarse.
+const PERIODS = [{label: 'Weekly', v: 'week'}, {label: 'Monthly', v: 'month'}];
+const period = {report: 'week', hours: 'week'};
+
+// Every fetch below reads the pickers at call time, so a response can land after
+// the user has moved one. Rendering it then paints stale rows under a fresh
+// label - a week-bucketed chart captioned "by month, last 12". Snapshot the
+// pickers with the request and drop the response if they've moved since; the
+// handler that moved them has already drawn the right thing.
+const pickersKey = () => JSON.stringify([range, period]);
 
 const panelQs = n => {
   let qs = `tz=${enc(TZ)}`;
-  if (n === 'report' || n === 'hours') qs += '&period=week';
+  if (period[n]) qs += `&period=${period[n]}`;
   for (const [section, panels] of Object.entries(RANGE_PANELS))
-    if (panels.includes(n) && range[section]) qs += `&days=${range[section]}`;
+    // send 0 rather than omitting it: "All" has to override a server default
+    // that isn't all time, which is the case for /clock.
+    if (panels.includes(n)) qs += `&days=${range[section]}`;
   return qs;
 };
 
-// drawn from RANGES rather than written into the markup, so they can't drift
+// drawn from RANGES/PERIODS rather than written into the markup, so they can't drift
 function drawRanges() {
-  document.querySelectorAll('.ranges').forEach(box => {
+  document.querySelectorAll('.ranges[data-ranges]').forEach(box => {
     const section = box.dataset.ranges;
     box.innerHTML = RANGES.map(r =>
       `<button data-days="${r.days}"${range[section] === r.days ? ' class="active"' : ''}>${r.label}</button>`
+    ).join('');
+  });
+  document.querySelectorAll('.ranges[data-periods]').forEach(box => {
+    const panel = box.dataset.periods;
+    box.innerHTML = PERIODS.map(p =>
+      `<button data-period="${p.v}"${period[panel] === p.v ? ' class="active"' : ''}>${p.label}</button>`
     ).join('');
   });
 }
@@ -576,17 +686,29 @@ drawRanges();  // the script runs after the markup, so the buttons exist now
 document.addEventListener('click', async e => {
   const btn = e.target.closest('.ranges button');
   if (!btn || !currentUser) return;
-  const section = btn.closest('.ranges').dataset.ranges;
-  range[section] = Number(btn.dataset.days);
+  const box = btn.closest('.ranges');
+
+  if (box.dataset.periods) {   // week/month toggle on a bar chart
+    const panel = box.dataset.periods;
+    const p = period[panel] = btn.dataset.period;
+    drawRanges();
+    let rows;
+    try { rows = await get(currentUser, panel, panelQs(panel)); } catch { return; }
+    if (period[panel] !== p) return;   // a later click already won
+    if (panel === 'report') drawPlays(rows); else drawHours(rows);
+    return;
+  }
+
+  const section = box.dataset.ranges;
+  const days = range[section] = Number(btn.dataset.days);
   drawRanges();
   // refetch only the panels this picker feeds, not the whole dashboard
   const names = RANGE_PANELS[section];
   const settled = await Promise.allSettled(names.map(n => get(currentUser, n, panelQs(n))));
+  if (range[section] !== days) return;   // a later click already won
   const patch = {};
   names.forEach((n, i) => { if (settled[i].status === 'fulfilled') patch[n] = settled[i].value; });
-  if (section === 'genres') renderGenres(patch['tag-shift'] || []);
-  else if (section === 'loyalty') renderLoyalty(patch.loyalty || []);
-  else renderBinges(patch['song-binges'] || [], patch.binges || []);
+  RANGE_RENDER[section](patch);
 });
 
 // one render path per section, so a range change and a full draw agree
@@ -621,11 +743,15 @@ function renderBinges(songBinges, binges) {
 // blank the dashboard - matters more now reads don't wait on the sync, since
 // early panels come back thin for real reasons.
 async function fetchPanels(user) {
+  const key = pickersKey();
   const settled = await Promise.allSettled(PANELS.map(n => get(user, n, panelQs(n))));
   if (settled.every(r => r.status === 'rejected')) throw new Error(settled[0].reason.message);
   const d = {};
   PANELS.forEach((n, i) => d[n] = settled[i].status === 'fulfilled' ? settled[i].value : null);
-  return { d, failed: settled.filter(r => r.status === 'rejected').length };
+  // `stale` = a picker moved while this was in flight, so d is a whole dashboard
+  // of rows for ranges nobody is looking at any more
+  return { d, failed: settled.filter(r => r.status === 'rejected').length,
+           stale: key !== pickersKey() };
 }
 
 // while the background pull runs, poll for progress and redraw when it lands.
@@ -649,8 +775,10 @@ async function watchSync(user) {
     // (scrobbles done -> full charts, enrichment done -> hours & genres)
     if (phase !== lastPhase) {
       lastPhase = phase;
-      try { const { d } = await fetchPanels(user); if (user === currentUser) { render(d); loadScrobbles(); } }
-      catch { /* keep what's on screen; still valid, just older */ }
+      try {
+        const { d, stale } = await fetchPanels(user);
+        if (user === currentUser && !stale) { render(d); loadScrobbles(); }
+      } catch { /* keep what's on screen; still valid, just older */ }
     }
     if (user !== currentUser) return false;
     if (phase === 'pulling') {
@@ -696,6 +824,7 @@ $('form').addEventListener('submit', async e => {
     Object.assign(hist, { offset: 0, search: '', sort: 'listened_at', dir: 'desc', start: null, end: null });
     $('scrob-search').value = ''; updateScrobFilter(); loadScrobbles();
     $('compat').innerHTML = ''; $('other').value = '';
+    $('seed-input').value = ''; loadSeedOptions(user);
     $('landing').hidden = true; $('app').hidden = false; switchTab('overview');
     $('viewing').hidden = false;
     $('viewing').innerHTML = `viewing <a href="${lfmUser(user)}" target="_blank" rel="noopener">${esc(user)} ↗</a> on Last.fm`;
@@ -717,15 +846,16 @@ function render(d) {
   const clock = d.clock || [], hours = d.hours || [], loyalty = d.loyalty || [];
   const summary = d.summary || [], binges = d.binges || [], songBinges = d['song-binges'] || [];
   const tagShift = d['tag-shift'] || [];
-  const recs = d.recommendations || {artists: [], songs_from_favorites: [], songs_from_new_artists: []};
+  const recs = d.recommendations
+    || {artists: [], songs_from_favorites: [], songs_from_new_artists: [], feedback: []};
 
   $('t-plays').textContent = report.reduce((s, m) => s + m.plays, 0).toLocaleString();
   $('t-hours').textContent = Math.round(hours.reduce((s, m) => s + Number(m.hours || 0), 0)).toLocaleString();
   $('t-streak').textContent = streaks.length ? Math.max(...streaks.map(s => s.length_days)) : 0;
   $('t-artists').textContent = discovery.reduce((s, m) => s + m.new_artists, 0).toLocaleString();
 
-  barChart('bars', 'bar-labels', report.slice(-12), m => m.plays);
-  barChart('hbars', 'hbar-labels', hours.slice(-12), m => Number(m.hours || 0));
+  drawPlays(report);
+  drawHours(hours);
   drawClock(clock);
   drawGenreClock(d['genre-clock'] || []);
 
@@ -749,6 +879,31 @@ function render(d) {
 
   renderBinges(songBinges, binges);
 
+  renderRecs(recs);
+}
+
+// --- For you -----------------------------------------------------------------
+
+// the current user's seeds and blocks, kept here so the modal and the rec list
+// can both show what state an artist is already in
+let feedback = [];
+
+const verdictOf = name => (feedback.find(f =>
+  f.artist_name.toLowerCase() === name.toLowerCase()) || {}).verdict;
+
+// both verdicts toggle: clicking the one that's already set clears it, so the
+// buttons are their own undo and the tuning list below isn't the only way back
+const fbButtons = name => {
+  const v = verdictOf(name);
+  return `<div class="fb">
+    <button data-artist="${esc(name)}" data-verdict="seed"${v === 'seed' ? ' class="on"' : ''}>More like this</button>
+    <button data-artist="${esc(name)}" data-verdict="block"${v === 'block' ? ' class="on"' : ''}>Not interested</button>
+  </div>`;
+};
+
+function renderRecs(recs) {
+  feedback = recs.feedback || [];
+
   const gw = {};
   recs.songs_from_new_artists.forEach(s => (gw[s.artist_name] = gw[s.artist_name] || []).push(s.track_name));
   $('recs').innerHTML = recs.artists.map((a, i) => {
@@ -764,7 +919,7 @@ function render(d) {
       <div class="name">${artistBtn(a.artist_name)}</div>
       <div class="match"><span class="meter"><span style="width:${pct}%"></span></span>
         <span class="pct" title="cosine similarity of genre tags, 0 to 1">${matchLabel(a.score)} · ${a.score.toFixed(2)}</span></div>
-      ${gwHtml}</div></div>`;
+      ${gwHtml}${fbButtons(a.artist_name)}</div></div>`;
   }).join('') || emptyMsg('recommendations are computed on a schedule, check back shortly');
 
   // same numbered .rec skeleton as "Artists to explore" so both For-you columns
@@ -774,7 +929,65 @@ function render(d) {
       <div class="name">${trackLink(s.artist_name, s.track_name)}</div>
       <div class="recby">${artistBtn(s.artist_name)}</div></div></div>`
   ).join('') || emptyMsg('nothing yet, computed on a schedule');
+
+  $('tune-block').hidden = !feedback.length;
+  $('tune').innerHTML = feedback.map(f =>
+    `<span><b>${f.verdict === 'seed' ? 'more like' : 'blocked'}</b> ${esc(f.artist_name)}
+      <button data-artist="${esc(f.artist_name)}" title="remove" aria-label="stop tuning on ${esc(f.artist_name)}">×</button></span>`
+  ).join('');
 }
+
+// verdict null clears. refetching the whole panel afterwards rather than
+// patching the DOM, because a block deletes the cached row server side and the
+// list has to come back without it.
+// btn is null when the seed came from the box below rather than a rec's buttons
+async function sendFeedback(btn, artist, verdict) {
+  if (!currentUser) return;
+  const qs = `?artist=${enc(artist)}` + (verdict ? `&verdict=${verdict}` : '');
+  const box = btn && btn.closest('.fb');
+  try {
+    await fetch(`${API}/analytics/${enc(currentUser)}/feedback${qs}`,
+                {method: verdict ? 'POST' : 'DELETE'});
+    renderRecs(await get(currentUser, 'recommendations'));
+  } catch { /* leave what's on screen; the click just didn't land */ }
+  // renderRecs replaces the rec list wholesale, so a button in it is already
+  // gone. one in the artist modal isn't, and redrawing the pair (rather than
+  // just the button clicked) is what turns the other one off when a verdict
+  // replaces the opposite verdict.
+  if (box && box.isConnected) box.outerHTML = fbButtons(artist);
+  else if (btn) btn.disabled = false;
+}
+
+// the user's own played artists, offered as native datalist suggestions. loaded
+// once per user: it's a plain name list, and <datalist> filters as you type
+// without a keystroke round trip or any dropdown code of our own.
+async function loadSeedOptions(user) {
+  let names = [];
+  try { names = await get(user, 'artists', 'limit=500'); } catch { return; }
+  $('seed-list').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+}
+
+// a seed doesn't have to be an artist you've played - "find me more like this"
+// works just as well for one you only know of - so free text is accepted and the
+// suggestions are only a convenience.
+$('seed-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('seed-input').value.trim();
+  if (!name || !currentUser) return;
+  $('seed-input').value = '';
+  await sendFeedback(null, name, 'seed');
+});
+
+document.addEventListener('click', e => {
+  const rate = e.target.closest('.fb button');
+  if (rate) {
+    rate.disabled = true;   // one pending write per button, it's a round trip
+    return sendFeedback(rate, rate.dataset.artist,
+                        rate.classList.contains('on') ? null : rate.dataset.verdict);
+  }
+  const drop = e.target.closest('.tune button');
+  if (drop) { drop.disabled = true; return sendFeedback(drop, drop.dataset.artist, null); }
+});
 
 function rankRow(kHtml, frac, valText) {
   const w = Math.max(2, Math.round(100 * frac));
@@ -782,14 +995,34 @@ function rankRow(kHtml, frac, valText) {
     <span class="meter"><span style="width:${w}%"></span></span><span class="v">${esc(valText)}</span></div>`;
 }
 
-function barChart(barsId, labelsId, rows, valOf) {
+// one render path per bar chart, so a period change and a full draw agree - the
+// same reason renderGenres/renderLoyalty/renderBinges exist.
+function drawPlays(report) {
+  const p = period.report;
+  barChart('bars', 'bar-labels', (report || []).slice(-12), m => m.plays, p);
+  $('bars-cap').textContent = `by ${p}, last 12`;
+  $('bars-note').textContent = `Click a bar to see that ${p}'s scrobbles.`;
+}
+
+function drawHours(hours) {
+  const p = period.hours;
+  barChart('hbars', 'hbar-labels', (hours || []).slice(-12), m => Number(m.hours || 0), p);
+  $('hbars-cap').textContent = `by ${p}, last 12`;
+  $('hbars-note').textContent = `Click a bar for that ${p}. Numbers are likely `
+    + `slightly lower than reality, since Last.fm has no stored length for some `
+    + `tracks, which count as zero.`;
+}
+
+function barChart(barsId, labelsId, rows, valOf, p) {
   const max = Math.max(...rows.map(valOf), 1);
   $(barsId).innerHTML = rows.map(r => {
     const v = valOf(r), h = Math.round(100 * v / max);
     const label = Number.isInteger(v) ? v.toLocaleString() : v;
-    return `<div class="col" data-week="${esc(r.month)}" title="${esc(fmtWeek(r.month))}: ${label}"><span class="bar" style="height:${h}%"><span class="v">${label}</span></span></div>`;
+    // data-period travels with the bar so a click knows how wide its bucket is,
+    // rather than reading a picker that may have moved on since the draw
+    return `<div class="col" data-week="${esc(r.month)}" data-period="${p}" title="${esc(fmtBucket(r.month, p))}: ${label}"><span class="bar" style="height:${h}%"><span class="v">${label}</span></span></div>`;
   }).join('');
-  $(labelsId).innerHTML = rows.map(r => `<span>${esc(fmtWeek(r.month))}</span>`).join('');
+  $(labelsId).innerHTML = rows.map(r => `<span>${esc(fmtBucket(r.month, p))}</span>`).join('');
 }
 
 // must match PART_NAMES in queries/analytics.py, index order included: a
@@ -857,17 +1090,58 @@ function drawClock(rows) {
   const naturalW = cols.length * hc + (cols.length - 1) * GAP;
   const center = naturalW < avail ? 'justify-content:center' : '';
 
+  // arrows only when it overflows; a centered strip has nowhere to go
+  const arrow = (dir, glyph) => center ? ''
+    : `<button class="hm-arrow" type="button" data-dir="${dir}" aria-label="scroll ${dir < 0 ? 'back' : 'forward'}">${glyph}</button>`;
   $('clock').innerHTML = `<div class="hm" style="--hc:${hc}px">
       <div class="hm-rowlabels">${rowLabels}</div>
+      ${arrow(-1, '‹')}
       <div class="hm-scroll"><div class="hm-months" style="${center}">${months}</div>
         <div class="hm-days" style="${center}">${days}</div></div>
+      ${arrow(1, '›')}
     </div>
     <div class="hm-legend">Less <i data-lvl="1"></i><i data-lvl="2"></i><i data-lvl="3"></i><i data-lvl="4"></i> More</div>`;
   $('clock-cap').textContent = `by day & part of day · ${TZ_LABEL}`;
-  // pin to the newest day only when the strip actually overflows. a centered
-  // one has nowhere to go and would just jump.
-  if (!center) { const sc = $('clock').querySelector('.hm-scroll'); if (sc) sc.scrollLeft = sc.scrollWidth; }
+  // pin to the newest day, the end you care about on a long history
+  if (!center) {
+    const sc = $('clock').querySelector('.hm-scroll');
+    // instant, not the smooth scroll the arrows use: this is the initial
+    // position, not a movement to watch
+    if (sc) { sc.style.scrollBehavior = 'auto'; sc.scrollLeft = sc.scrollWidth; sc.style.scrollBehavior = ''; }
+    updateClockArrows();
+  }
 }
+
+// grey out an arrow at the end it can't move past, so the strip's extent is
+// visible now that there's no scrollbar to show it. `at` is where the strip is
+// HEADING: a smooth scroll is still animating when the click handler calls
+// this, so reading scrollLeft would judge the buttons on the old position and
+// leave the one you just moved away from disabled.
+function updateClockArrows(at) {
+  const sc = $('clock').querySelector('.hm-scroll');
+  if (!sc) return;
+  const x = typeof at === 'number' ? at : sc.scrollLeft;
+  const back = $('clock').querySelector('.hm-arrow[data-dir="-1"]');
+  const fwd = $('clock').querySelector('.hm-arrow[data-dir="1"]');
+  if (back) back.disabled = x <= 0;
+  // 1px of slack: scrollLeft is fractional at non-integer zoom and never lands
+  // exactly on the maximum
+  if (fwd) fwd.disabled = x >= sc.scrollWidth - sc.clientWidth - 1;
+}
+
+$('clock').addEventListener('click', e => {
+  const arrow = e.target.closest('.hm-arrow');
+  if (!arrow) return;
+  const sc = $('clock').querySelector('.hm-scroll');
+  // about half a screen a press, enough to be worth the click and little enough
+  // to keep your place
+  const step = Number(arrow.dataset.dir) * Math.round(sc.clientWidth * 0.5);
+  const target = Math.max(0, Math.min(sc.scrollLeft + step, sc.scrollWidth - sc.clientWidth));
+  sc.scrollBy({left: step});
+  updateClockArrows(target);
+});
+// wheel and trackpad move it too, and those come with no target to predict
+$('clock').addEventListener('scroll', () => updateClockArrows(), true);
 
 // genre routine: weekday x part grid, one cell per slot, showing the genre that
 // slot is mostly made of. sibling to the listening clock but a different
@@ -969,7 +1243,7 @@ document.body.addEventListener('click', e => {
   const gen = e.target.closest('.genre');
   if (gen) { e.preventDefault(); return openGenre(gen.dataset.genre); }
   const col = e.target.closest('.chart .col[data-week]');
-  if (col) return gotoWeek(col.dataset.week);
+  if (col) return gotoBucket(col.dataset.week, col.dataset.period);
 });
 
 // modal
@@ -989,7 +1263,10 @@ async function openArtist(name) {
   const tracks = a.top_tracks.length
     ? `<h4>Popular tracks</h4><ol>${a.top_tracks.map(t => `<li>${trackLink(a.name, t)}</li>`).join('')}</ol>` : '';
   const played = a.plays ? `${a.plays.toLocaleString()} plays in this library` : 'not in this library yet';
-  $('modal-body').innerHTML = `<h3>${esc(a.name)}</h3><p class="plays">${played}</p>${chips}${tracks}
+  // the same two controls as a recommendation, so any artist on the page can be
+  // pointed at or away from, not just the ones already being recommended
+  $('modal-body').innerHTML = `<h3>${esc(a.name)}</h3><p class="plays">${played}</p>${chips}
+    ${fbButtons(a.name)}${tracks}
     <a class="lfm" href="${lfmArtist(a.name)}" target="_blank" rel="noopener">Open on Last.fm ↗</a>`;
 }
 
@@ -1007,8 +1284,13 @@ async function openGenre(tag) {
   $('modal-body').innerHTML = `<h3>${esc(tag)}</h3><p class="plays">a genre in this library</p>${list}`;
 }
 
-function gotoWeek(week) {
-  Object.assign(hist, { start: week, end: addDays(week, 7), search: '', offset: 0 });
+function gotoBucket(start, p) {
+  Object.assign(hist, {
+    start, end: bucketEnd(start, p), search: '', offset: 0,
+    // the label is set here because the picker it came from can change before
+    // the filter bar is next drawn
+    label: p === 'month' ? fmtBucket(start, p) : `Week of ${fmtBucket(start, p)}`,
+  });
   $('scrob-search').value = '';
   switchTab('scrobbles'); updateScrobFilter(); loadScrobbles();
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -1017,7 +1299,7 @@ function gotoWeek(week) {
 function updateScrobFilter() {
   const f = $('scrob-filter');
   let label = '';
-  if (hist.start) label = `Week of ${fmtWeek(hist.start)}`;
+  if (hist.start) label = hist.label;
   else if (hist.search) label = `Matching “${hist.search}”`;
   if (label) { f.hidden = false; f.innerHTML = `${label} <button type="button" id="clear-filter">clear</button>`; }
   else { f.hidden = true; f.innerHTML = ''; }

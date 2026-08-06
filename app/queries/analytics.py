@@ -152,35 +152,38 @@ def _recent(days: int | None, col: str = "listened_at") -> tuple[str, list]:
 PART_NAMES = ["night", "morning", "afternoon", "evening"]
 
 
-def get_listening_clock(cur, user_id: int, tz: str = "UTC", days: int = 365):
-    """Plays per (calendar day, part of day) over the last `days` days: one
-    column per real date, like a contributions graph. A cell maps to exactly one
-    date and block, so it can be drilled into. Only non-empty pairs come back;
-    the caller fills the gaps."""
+def get_listening_clock(cur, user_id: int, tz: str = "UTC", days: int | None = 365):
+    """Plays per (calendar day, part of day) over the last `days` days (None =
+    all time): one column per real date, like a contributions graph. A cell maps
+    to exactly one date and block, so it can be drilled into. Only non-empty
+    pairs come back; the caller fills the gaps."""
     day = _LOCAL_DATE.format(col="listened_at")
     part = _PART_OF_DAY.format(col="listened_at")
+    recent, recent_params = _recent(days)
     cur.execute(
         f"""
         SELECT {day}    AS day,
                {part}   AS part,
                COUNT(*) AS plays
         FROM scrobbles
-        WHERE user_id = %s
-          AND listened_at >= now() - make_interval(days => %s)
+        WHERE user_id = %s{recent}
         GROUP BY day, part
         ORDER BY day, part
         """,
-        (tz, tz, user_id, days),
+        [tz, tz, user_id] + recent_params,
     )
     return cur.fetchall()
 
 
-def get_genre_clock(cur, user_id: int, tz: str = "UTC"):
+def get_genre_clock(cur, user_id: int, tz: str = "UTC", days: int | None = None):
     """Genre heatmap: plays per (weekday, part, primary tag). weekday 0=Sunday,
     part 0-3. Stays an AGGREGATE weekday grid unlike get_listening_clock, because
-    per-date tag cells would be too sparse to read. Nothing renders it yet."""
+    per-date tag cells would be too sparse to read. `days` is its range picker
+    (None = all time), which is what turns "what a typical week sounds like" into
+    a question you can ask of one season."""
     weekday = _WEEKDAY.format(col="s.listened_at")
     part = _PART_OF_DAY.format(col="s.listened_at")
+    recent, recent_params = _recent(days, "s.listened_at")
     cur.execute(
         _PRIMARY_TAG_CTE + f"""
         SELECT {weekday} AS weekday,
@@ -189,11 +192,11 @@ def get_genre_clock(cur, user_id: int, tz: str = "UTC"):
                COUNT(*)  AS plays
         FROM scrobbles s
         JOIN primary_tag p ON p.artist_name = s.artist_name
-        WHERE s.user_id = %s
+        WHERE s.user_id = %s{recent}
         GROUP BY weekday, part, p.tag
         ORDER BY weekday, part, plays DESC
         """,
-        (tz, tz, user_id),
+        [tz, tz, user_id] + recent_params,
     )
     return cur.fetchall()
 

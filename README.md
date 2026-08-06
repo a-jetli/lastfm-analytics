@@ -77,12 +77,19 @@ Analytics endpoints, all under `/analytics/{user}`:
 /genre            your tracks in one genre
 /artist           one artist's plays, genres, top tracks
 /scrobbles        searchable, paged play history
-/recommendations  artists to try, plus tracks
+/recommendations  artists to try, plus tracks, plus your seeds and blocks
+/feedback         POST/DELETE "more like this" or "not interested" on an artist
+/artists          artists you've played, for the "more like this" suggestions
 /compatibility/{other}   taste overlap with another user
 ```
 
-`/loyalty`, `/tag-shift`, `/binges` and `/song-binges` take `?days=` to limit the
-window (0 = all time). Anything that buckets by date takes `?tz=`.
+`/loyalty`, `/tag-shift`, `/binges`, `/song-binges`, `/clock` and `/genre-clock`
+take `?days=` to limit the window (0 = all time). `/report` and `/hours` take
+`?period=week|month`. Anything that buckets by date takes `?tz=`.
+
+`/feedback?artist=X&verdict=seed|block` tunes the recommender by hand. A block
+drops the artist and keeps it out of later rebuilds; a seed makes the list bend
+toward artists like it, and sends one `artist.getSimilar` call to go find some.
 
 Scrobble search takes field terms: `artist:`, `track:`, `album:`, `year:`,
 `month:`, `day:`, `date:`, `part:`, plus bare text. Quote values with spaces,

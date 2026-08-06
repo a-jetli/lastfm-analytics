@@ -112,19 +112,118 @@ SIMILAR_PER_ARTIST = 10
 def get_top_artists(cur, user_id: int, limit: int = SEED_ARTISTS):
     """A user's most-played artists, best first. Seeds the similar-artist
     lookup. Grouped case-insensitively with a mode() display name, matching
-    get_user_plays, so a mixed-casing artist is one seed and not two."""
+    get_user_plays, so a mixed-casing artist is one seed and not two.
+
+    Blocked artists are skipped: "not interested" has to mean the pool stops
+    growing in that direction too, not just that one name disappears from the
+    list."""
     cur.execute(
         """
         SELECT mode() WITHIN GROUP (ORDER BY artist_name) AS artist_name
-        FROM scrobbles
-        WHERE user_id = %s
-        GROUP BY lower(artist_name)
+        FROM scrobbles s
+        WHERE s.user_id = %s
+          AND NOT EXISTS (
+              SELECT 1 FROM artist_feedback f
+              WHERE f.user_id = s.user_id AND f.verdict = 'block'
+                AND lower(f.artist_name) = lower(s.artist_name)
+          )
+        GROUP BY lower(s.artist_name)
         ORDER BY COUNT(*) DESC
         LIMIT %s
         """,
         (user_id, limit),
     )
     return [row[0] for row in cur.fetchall()]
+
+
+# --- explicit feedback: the one place an opinion, not a play, steers the model -
+
+
+def set_feedback(cur, user_id: int, artist_name: str, verdict: str) -> None:
+    """Record "more like this" (seed) or "not interested" (block) for an artist.
+    Upsert on the case-insensitive key, so flipping a verdict replaces it rather
+    than leaving both. A re-seed clears expanded_at so the similar-artist lookup
+    runs for it again on the next pass."""
+    cur.execute(
+        """
+        INSERT INTO artist_feedback (user_id, artist_name, verdict)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, lower(artist_name)) DO UPDATE
+            SET artist_name = EXCLUDED.artist_name,
+                verdict     = EXCLUDED.verdict,
+                expanded_at = NULL
+        """,
+        (user_id, artist_name, verdict),
+    )
+
+
+def clear_feedback(cur, user_id: int, artist_name: str) -> None:
+    """Undo a seed or block. The artist goes back to being judged on plays alone."""
+    cur.execute(
+        """
+        DELETE FROM artist_feedback
+        WHERE user_id = %s AND lower(artist_name) = lower(%s)
+        """,
+        (user_id, artist_name),
+    )
+
+
+def get_feedback(cur, user_id: int):
+    """Every artist this user has an opinion on, for the tuning list in the UI."""
+    cur.execute(
+        """
+        SELECT artist_name, verdict FROM artist_feedback
+        WHERE user_id = %s ORDER BY verdict, lower(artist_name)
+        """,
+        (user_id,),
+    )
+    return cur.fetchall()
+
+
+def get_feedback_names(cur, user_id: int, verdict: str) -> list[str]:
+    """Just the names for one verdict. What the recommender pass needs."""
+    cur.execute(
+        "SELECT artist_name FROM artist_feedback WHERE user_id = %s AND verdict = %s",
+        (user_id, verdict),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def get_pending_seeds(cur, user_id: int) -> list[str]:
+    """Seeds whose similar artists haven't been fetched yet. Bounds the cost of
+    seeding: each one costs a single Last.fm call, once."""
+    cur.execute(
+        """
+        SELECT artist_name FROM artist_feedback
+        WHERE user_id = %s AND verdict = 'seed' AND expanded_at IS NULL
+        """,
+        (user_id,),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def mark_seeds_expanded(cur, user_id: int) -> None:
+    """Stamp this user's seeds as looked up, so the next pass skips them."""
+    cur.execute(
+        """
+        UPDATE artist_feedback SET expanded_at = now()
+        WHERE user_id = %s AND verdict = 'seed' AND expanded_at IS NULL
+        """,
+        (user_id,),
+    )
+
+
+def drop_recommendation(cur, user_id: int, artist_name: str) -> None:
+    """Evict one artist from the cached list. Blocking already keeps it out of
+    the next rebuild; this is so "not interested" takes effect on the page now
+    instead of whenever the maintenance pass next runs."""
+    cur.execute(
+        """
+        DELETE FROM recommendations
+        WHERE user_id = %s AND lower(artist_name) = lower(%s)
+        """,
+        (user_id, artist_name),
+    )
 
 
 def filter_unknown_artists(cur, names: list[str]) -> list[str]:

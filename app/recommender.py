@@ -81,14 +81,30 @@ def cosine(a: dict[str, float], b: dict[str, float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+# How much of the ranking a "more like this" pick takes over, when there is one.
+# Half, because a seed has to actually move the list to mean anything: folded
+# into the taste vector as one more artist it moved scores by 0.002 against a
+# history of hundreds, which is not a feature. At 0.5 the list is half "your
+# taste" and half "the direction you pointed", and dropping the seed puts it
+# straight back. A knob.
+SEED_WEIGHT = 0.5
+
+
 def recommend(
     user_vector: dict[str, float],
     artist_vectors: dict[str, dict[str, float]],
     already_played: set[str],
     k: int = 20,
+    seed_vector: dict[str, float] | None = None,
 ) -> list[tuple[str, float]]:
     """Top k unplayed artists as (artist, cosine score), best first. Zero
     scores (no tag overlap) are dropped rather than used as filler.
+
+    `seed_vector` is the artists the user explicitly asked for more of, summed
+    the same way a taste vector is. When present, a candidate is scored against
+    both directions and the two are blended, so the list bends toward the pick
+    without abandoning the play history. When absent, this is plain cosine
+    against taste and nothing changes.
 
     The exclusion is case-insensitive. Both sides are canonicalised upstream, but
     they are canonicalised from different tables (scrobbles vs artist_tags), so
@@ -101,6 +117,9 @@ def recommend(
         if artist.lower() in played:
             continue
         score = cosine(user_vector, vec)
+        if seed_vector:
+            score = ((1 - SEED_WEIGHT) * score
+                     + SEED_WEIGHT * cosine(seed_vector, vec))
         if score > 0:
             scored.append((artist, score))
     scored.sort(key=lambda pair: pair[1], reverse=True)

@@ -1,6 +1,10 @@
-"""Insight endpoints (read side). No SQL here: each route resolves the
-username, refreshes stale data, runs one function from app/queries, and
-returns the rows. dict_row makes rows JSON-shaped dicts."""
+"""Insight endpoints. No SQL here: each route resolves the username, refreshes
+stale data, runs one function from app/queries, and returns the rows. dict_row
+makes rows JSON-shaped dicts.
+
+Reads, except for /feedback, which is where a user tells the recommender it got
+one wrong. It lives here rather than with the sync writes because it's part of
+the same resource as /recommendations."""
 
 from zoneinfo import ZoneInfo
 
@@ -81,19 +85,20 @@ def loyalty(username: str, tz: str = "UTC", days: int = 0):
 def clock(username: str, tz: str = "UTC", days: int = 365):
     # contributions-graph heatmap, one column per real date over the last ?days=,
     # split in 4. same tz + a date:/part: search reproduces a cell exactly.
+    # ?days=0 is all time, one column per day since the first play.
     user_id = _prepare(username)
-    days = max(1, min(days, 366))
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return q.get_listening_clock(cur, user_id, _tz(tz), days)
+        return q.get_listening_clock(cur, user_id, _tz(tz), _days(days))
 
 
 @router.get("/{username}/genre-clock")
-def genre_clock(username: str, tz: str = "UTC"):
+def genre_clock(username: str, tz: str = "UTC", days: int = 0):
     # genre heatmap: plays per {weekday, part, tag}, same buckets as /clock so it
-    # overlays cell for cell. nothing renders it yet.
+    # overlays cell for cell. ?days= scopes it to a window (0 = all time), which
+    # is how a "typical week" becomes a typical week of this season.
     user_id = _prepare(username)
     with db.get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return q.get_genre_clock(cur, user_id, _tz(tz))
+        return q.get_genre_clock(cur, user_id, _tz(tz), _days(days))
 
 
 @router.get("/{username}/summary")
@@ -168,7 +173,48 @@ def recommendations(username: str):
             "artists": q_recommend.get_recommendations(cur, user_id),
             "songs_from_favorites": q_recommend.get_song_recs_favorites(cur, user_id),
             "songs_from_new_artists": q_recommend.get_song_recs_discovery(cur, user_id),
+            "feedback": q_recommend.get_feedback(cur, user_id),
         }
+
+
+@router.get("/{username}/artists")
+def artists(username: str, limit: int = 500):
+    # every artist this user has played, most played first. backs the datalist on
+    # the "more like this" box, so adding a seed is picked from your own history
+    # rather than typed blind.
+    user_id = _prepare(username)
+    with db.get_connection() as conn, conn.cursor() as cur:
+        return q_recommend.get_top_artists(cur, user_id, max(1, min(limit, 2000)))
+
+
+@router.post("/{username}/feedback")
+def set_feedback(username: str, artist: str, verdict: str):
+    # ?verdict=seed ("more like this") or block ("not interested"). ?artist= is a
+    # query param for the same reason as /artist: names contain slashes.
+    if verdict not in ("seed", "block"):
+        raise HTTPException(status_code=400, detail="verdict must be seed or block")
+    if not artist.strip():
+        raise HTTPException(status_code=400, detail="artist is required")
+    user_id = _prepare(username)
+    with db.get_connection() as conn, conn.cursor() as cur:
+        q_recommend.set_feedback(cur, user_id, artist, verdict)
+        # the next maintenance pass keeps a blocked artist out of the rebuild;
+        # evicting it here is what makes the click take effect on the page.
+        if verdict == "block":
+            q_recommend.drop_recommendation(cur, user_id, artist)
+        conn.commit()
+    return {"artist_name": artist, "verdict": verdict}
+
+
+@router.delete("/{username}/feedback")
+def unset_feedback(username: str, artist: str):
+    # undo a seed or block. the artist goes back to being judged on plays alone,
+    # and a blocked one can reappear after the next pass.
+    user_id = _prepare(username)
+    with db.get_connection() as conn, conn.cursor() as cur:
+        q_recommend.clear_feedback(cur, user_id, artist)
+        conn.commit()
+    return {"artist_name": artist, "verdict": None}
 
 
 @router.get("/{username}/report")
