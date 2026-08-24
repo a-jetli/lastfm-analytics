@@ -56,9 +56,22 @@
     color: var(--ink); padding: 7px 13px 7px 11px; border-radius: 999px;
     background: color-mix(in srgb, var(--accent) 14%, var(--bg-2));
     border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); }
-  #status:not(:empty)::before { content: ""; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent); animation: statpulse 1.1s ease-in-out infinite; }
-  @keyframes statpulse { 0%, 100% { opacity: .3; transform: scale(.7); } 50% { opacity: 1; transform: scale(1); } }
+  /* Three-bar EQ. One pseudo-element, three gradient layers; the animation steps
+     the background-size list so one bar is tall per 0.5s frame. No extra DOM,
+     which matters because the JS sets #status with textContent. */
+  #status:not(:empty)::before { content: ""; width: 13px; height: 10px;
+    background-image: linear-gradient(var(--accent), var(--accent)),
+                      linear-gradient(var(--accent), var(--accent)),
+                      linear-gradient(var(--accent), var(--accent));
+    background-repeat: no-repeat;
+    background-position: 0 100%, 5px 100%, 10px 100%;
+    background-size: 3px 100%, 3px 40%, 3px 40%;
+    animation: stateq 1.5s steps(1, end) infinite; }
+  @keyframes stateq {
+    0%  { background-size: 3px 100%, 3px 40%,  3px 40%; }
+    33% { background-size: 3px 40%,  3px 100%, 3px 40%; }
+    66% { background-size: 3px 40%,  3px 40%,  3px 100%; }
+  }
   @media (prefers-reduced-motion: reduce) { #status:not(:empty)::before { animation: none; } }
   .viewing { font-size: 13px; color: var(--muted); margin-top: 8px; }
   .viewing a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
@@ -385,8 +398,10 @@
   </header>
 
   <section id="landing">
-    <h2>I was frustrated with Spotify's lack of listening history and trends, so I <span>built the solution</span>.</h2>
+    <h2>I wanted <span>longer history</span> and <span>more insights</span> from my music platforms, so I built the tool I'd want, and it works for anyone.</h2>
     <p>To start, log in or sign up at <a href="https://www.last.fm/join" target="_blank" rel="noopener">last.fm</a> and connect to whatever services you stream on. Everything you play after that gets tracked, letting you explore your full history, streaks, genres, trends, binges, taste shifts, and more.</p>
+    <p>This app works through Last.fm to consolidate all your streams across a single usable API. Sign up, connect your accounts, and the app does the rest.</p>
+    <p>Note that data collection only starts once you sign up and connect your accounts, so anything you played before that is invisible to the application.</p>
     <p class="hint">Enter your Last.fm username above to begin.</p>
   </section>
 
