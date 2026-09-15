@@ -1,10 +1,7 @@
-"""FastAPI entry point.
+"""app entry point. `uvicorn app.main:app --reload`, then /docs.
 
-Run locally:  uvicorn app.main:app --reload   then open /docs.
-
-Layering: routers/* = HTTP (no SQL), queries/* = SQL (no HTTP), lastfm.py =
-the only file that calls Last.fm, sync_service.py = when/how syncs and the
-periodic enrichment run, recommender.py = pure recommendation math.
+layers: routers/* http only, queries/* sql only, lastfm.py the only outbound
+caller, sync_service.py decides when work runs, recommender.py is the math.
 """
 
 from contextlib import asynccontextmanager
@@ -20,17 +17,16 @@ from app.routers import analytics, sync
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # on boot, start the daily background refresh loop. nothing on shutdown.
+    # start the periodic refresh loop. nothing to do on shutdown.
     sync_service.start_scheduler()
     yield
 
 
 app = FastAPI(title="Rotation", lifespan=lifespan)
 
-# the deployed frontend is served by this app, same origin, no CORS needed. this
-# only opens the API to a local static dev server (VS Code Live Server on :5500,
-# say) so the page can be edited and reloaded there while still talking to this
-# backend. any localhost port, nothing public.
+# the deployed page is same-origin, so it needs no CORS. this exists only so a
+# local dev server (Live Server on :5500) can talk to this backend while you
+# edit. localhost only, nothing public.
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
@@ -47,7 +43,6 @@ def health():
     return {"status": "ok"}
 
 
-# the frontend, plain files in app/static served by this same process. mounted
-# last so it only answers URLs no API route claimed (html=True serves index.html
-# at /). same origin as the API, so the page's fetch() calls need no CORS.
+# the page itself, served by this same process. mounted last so it only answers
+# what no API route claimed. html=True serves index.html at /.
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True))

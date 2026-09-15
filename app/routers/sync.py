@@ -1,6 +1,6 @@
-"""POST /sync/{username}: the "join / catch me up" trigger. Validates and (on
-first join) creates the user, then hands off to sync_service, which pulls from
-Last.fm in the background and blocks briefly so a loading screen has data."""
+"""POST /sync/{username}: the join / catch-me-up trigger. validates the handle,
+creates the user on first sight, then hands off to sync_service, which pulls in
+the background and blocks briefly so the page has something to show."""
 
 from fastapi import APIRouter, HTTPException
 
@@ -12,9 +12,8 @@ router = APIRouter(prefix="/sync", tags=["sync"])
 
 @router.post("/{username}")
 def sync_user(username: str):
-    # join() checks a new handle against Last.fm before creating any row, so a typo
-    # gets a clean 404 rather than a phantom user and an endless spinner.
-    # force=True because pressing Load is an explicit "refresh me now".
+    # join() checks a new handle against Last.fm before writing a row, so a typo
+    # gets a 404 instead of a phantom user. force=True: Load means refresh now.
     try:
         _, is_new = sync_service.join(username, force=True, wait=True)
     except lastfm.LastfmUserNotFound:
@@ -24,15 +23,13 @@ def sync_user(username: str):
 
 @router.get("/{username}/status")
 def sync_status(username: str):
-    """Is a sync still running, in which stage, and how much has landed?
+    """is a sync running, in which stage, and how much has landed?
 
-    The page polls this while the background pull continues, so a first-time
-    user sees a rising play count and then "adding genres" instead of a frozen
-    spinner. Cheap: one indexed COUNT plus in-memory checks, no Last.fm call.
-    `phase` is "pulling" (scrobbles) or "enriching" (durations + tags), or null
-    when idle. `last_synced_at` is null until a full pull has completed once, so
-    the page can tell "still going / didn't finish" from "done". 404 for an
-    unknown user, matching the analytics routes.
+    polled while the background pull runs, so the page shows a rising count and
+    then "adding genres" instead of a frozen spinner. one indexed COUNT plus
+    in-memory checks, no Last.fm call. phase is "pulling" or "enriching", null
+    when idle. last_synced_at stays null until a full pull finishes once, which
+    is how the page tells "still going" from "done".
     """
     with db.get_connection() as conn, conn.cursor() as cur:
         row = sync_queries.get_user(cur, username)

@@ -1,9 +1,9 @@
--- lastfm-analytics schema. Apply once to a fresh DB: psql -d lastfm -f schema.sql
+-- rotation schema. apply once to a fresh db: psql -d lastfm -f schema.sql
 
 CREATE TABLE users (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     lastfm_username TEXT NOT NULL UNIQUE,
-    last_synced_at TIMESTAMPTZ  -- sync high-water mark; NULL = never synced
+    last_synced_at TIMESTAMPTZ  -- sync high-water mark. null means never synced
 );
 
 CREATE TABLE scrobbles (
@@ -13,17 +13,17 @@ CREATE TABLE scrobbles (
     track_name TEXT NOT NULL,
     album_name TEXT,
     listened_at TIMESTAMPTZ NOT NULL,
-    UNIQUE (user_id, track_name, listened_at)  -- makes re-syncs idempotent
+    UNIQUE (user_id, track_name, listened_at)  -- what makes re-syncs idempotent
 );
 
--- Every analytics query filters on user_id and ranges/sorts on listened_at;
--- loyalty and discovery additionally group by artist_name.
+-- every analytics query filters on user_id and ranges or sorts on listened_at.
+-- loyalty and discovery also group by artist_name.
 CREATE INDEX idx_scrobbles_user_time ON scrobbles (user_id, listened_at);
 CREATE INDEX idx_scrobbles_user_artist ON scrobbles (user_id, artist_name);
 
--- Track lengths from track.getInfo (Last.fm's scrobble feed carries none).
--- Global cache shared by all users; filled by the periodic backfill.
--- duration_ms = 0 when Last.fm has no duration (stored so we don't re-ask).
+-- track lengths from track.getInfo, since the scrobble feed carries none.
+-- a global cache shared by all users, filled by the periodic backfill.
+-- duration_ms is 0 when Last.fm has none, stored so we do not re-ask.
 CREATE TABLE track_durations (
     artist_name TEXT NOT NULL,
     track_name  TEXT NOT NULL,
@@ -31,10 +31,10 @@ CREATE TABLE track_durations (
     PRIMARY KEY (artist_name, track_name)
 );
 
--- Artist genre tags from artist.getTopTags, stored RAW (weight = Last.fm's
--- 0-100 count). Cleaning happens at read time via artist_tags_clean, so the
--- blocklist/aliases below can change without refetching. An artist Last.fm has
--- no tags for gets one sentinel row (tag = '') so the backfill skips it.
+-- artist genre tags from artist.getTopTags, stored raw, where weight is
+-- Last.fm's 0-100 count. cleaning happens at read time in artist_tags_clean, so
+-- the lists below can change with no refetch. an artist with no tags gets one
+-- sentinel row (tag = '') so the backfill skips it.
 CREATE TABLE artist_tags (
     artist_name TEXT NOT NULL,
     tag         TEXT NOT NULL,
@@ -42,11 +42,11 @@ CREATE TABLE artist_tags (
     PRIMARY KEY (artist_name, tag)
 );
 
--- Hand-curated deny-list of non-taste tags (rolling; add rows as junk surfaces).
--- Kept deliberately narrow: descriptive tags like "female vocalists" or
--- "japanese" are real taste signal. Blocked: generic Anglophone nationalities
--- (in an English-heavy library they mean nothing), quality judgements, and
--- personal/platform meta. All lowercase; compared against lowercased tags.
+-- hand-curated deny-list of non-taste tags. rolling, so add rows as junk shows
+-- up. deliberately narrow: descriptive tags like "female vocalists" or
+-- "japanese" are real taste signal. blocked are generic anglophone
+-- nationalities, which mean nothing in an english-heavy library, quality
+-- judgements, and platform meta. all lowercase, compared against lowered tags.
 CREATE TABLE tag_blocklist (
     tag TEXT PRIMARY KEY
 );
@@ -65,8 +65,8 @@ INSERT INTO tag_blocklist (tag) VALUES
     ('spotify'),('youtube'),('tiktok'),('tik tok'),('headphones'),('meme')
 ON CONFLICT (tag) DO NOTHING;
 
--- Spelling variants that lowercasing can't collapse (rolling, like the
--- blocklist). Maps a lowercased raw tag to its canonical form.
+-- spelling variants lowercasing cannot collapse, rolling like the blocklist.
+-- maps a lowercased raw tag to its canonical form.
 CREATE TABLE tag_aliases (
     alias     TEXT PRIMARY KEY,
     canonical TEXT NOT NULL
@@ -86,13 +86,12 @@ INSERT INTO tag_aliases (alias, canonical) VALUES
     ('alt rock','alternative rock')
 ON CONFLICT (alias) DO NOTHING;
 
--- Context-sensitive tag suppression: "if an artist carries `context_tag`, that
--- artist's `excluded_tag` is meaningless and gets dropped". The blocklist can't
+-- context-sensitive suppression: if an artist carries context_tag, that
+-- artist's excluded_tag is meaningless and gets dropped. the blocklist cannot
 -- express this because it is unconditional, and these tags are only wrong in
--- combination: "pop" on a Bollywood playback singer is Last.fm crowd shorthand
--- for "popular music", not the Western pop genre, and it swamps the real tag in
--- every genre chart. Same table shape and rolling-curation habit as the two
--- lists above, so a new pair is one INSERT and no refetch.
+-- combination. "pop" on a bollywood playback singer is crowd shorthand for
+-- "popular music", not the western genre, and it swamps the real tag in every
+-- chart. same shape as the two lists above, so a new pair is one insert.
 CREATE TABLE tag_exclusions (
     context_tag  TEXT NOT NULL,
     excluded_tag TEXT NOT NULL,
@@ -104,10 +103,10 @@ INSERT INTO tag_exclusions (context_tag, excluded_tag) VALUES
     ('india','pop'),('india','hip-hop')
 ON CONFLICT DO NOTHING;
 
--- The one clean view of artist tags every genre query reads: lowercase/trim,
--- apply aliases, drop the '' sentinel and blocklisted tags, apply the exclusion
--- pairs above, and collapse to one row per (artist, canonical tag) keeping the
--- strongest weight so joins can't double-count a play.
+-- the one clean view of artist tags every genre query reads. lowercase and
+-- trim, apply aliases, drop the sentinel and blocklisted tags, apply the
+-- exclusion pairs, then collapse to one row per (artist, tag) keeping the
+-- strongest weight so joins cannot double-count a play.
 CREATE VIEW artist_tags_clean AS
 WITH mapped AS (
     SELECT at.artist_name,
@@ -120,11 +119,11 @@ WITH mapped AS (
 allowed AS (  -- unconditional drops first, so exclusions match canonical tags
     SELECT * FROM mapped WHERE tag NOT IN (SELECT tag FROM tag_blocklist)
 ),
--- Every (artist, tag) the rules kill, built ONCE. Small: only artists carrying
--- a context tag contribute. Written as a set + anti-join rather than the
--- obvious correlated NOT EXISTS, which re-scanned the `allowed` CTE per row and
--- took this view from 10ms to 1.3s on a 6k-row corpus -- and every genre query
--- reads it.
+-- every (artist, tag) the rules kill, built once. small, since only artists
+-- carrying a context tag contribute. written as a set plus an anti-join rather
+-- than the obvious correlated NOT EXISTS, which re-scanned the `allowed` cte per
+-- row and took this view from 10ms to 1.3s on a 6k-row corpus. every genre
+-- query reads it.
 suppressed AS (
     SELECT DISTINCT a.artist_name, x.excluded_tag AS tag
     FROM allowed a
@@ -136,10 +135,10 @@ LEFT JOIN suppressed s ON s.artist_name = a.artist_name AND s.tag = a.tag
 WHERE s.artist_name IS NULL
 GROUP BY a.artist_name, a.tag;
 
--- Each artist's globally most-played tracks from artist.getTopTracks, best
--- first (rank 1 = biggest). Feeds song recommendations: fetched on a schedule for
--- users' favorite artists and for recommended artists. An artist Last.fm
--- doesn't know gets one sentinel row (track_name = '') so it isn't re-fetched.
+-- each artist's globally most-played tracks from artist.getTopTracks, best
+-- first, so rank 1 is biggest. feeds song recommendations, fetched on a schedule
+-- for favourite and recommended artists. an unknown artist gets one sentinel row
+-- so it is not re-fetched.
 CREATE TABLE artist_top_tracks (
     artist_name TEXT NOT NULL,
     track_name  TEXT NOT NULL,
@@ -147,36 +146,36 @@ CREATE TABLE artist_top_tracks (
     PRIMARY KEY (artist_name, track_name)
 );
 
--- Cached artist recommendations (precomputed output, not source data). Rebuilt
--- per user by sync_service._refresh_recommendations from scrobbles +
--- artist_tags_clean (TF-IDF/cosine, app/recommender.py); the /recommendations
--- endpoint serves it as-is. Empty for a user until that pass has run once.
+-- cached artist recommendations: precomputed output, not source data. rebuilt
+-- per user by sync_service._refresh_recommendations from scrobbles and
+-- artist_tags_clean, and /recommendations serves it as-is. empty for a user
+-- until that pass has run once.
 CREATE TABLE recommendations (
     user_id     INTEGER REFERENCES users(id) NOT NULL,
     artist_name TEXT NOT NULL,     -- an artist the user has NOT played
-    score       REAL NOT NULL,     -- 0-1 cosine similarity to their taste vector
-    rank        INTEGER NOT NULL,  -- 1 = best match
+    score       REAL NOT NULL,     -- 0-1 cosine against their taste vector
+    rank        INTEGER NOT NULL,  -- 1 is the best match
     computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, artist_name)
 );
 
--- Explicit taste feedback, the only place a user's opinion (rather than their
--- play history) enters the recommender.
---   'block' -- never recommend this artist, and never seed similars off it
---   'seed'  -- treat it like a most-played artist and go find more like it
--- Read by sync_service._refresh_recommendations (taste vector + exclusion set)
--- and _widen_candidate_pool (which artists to ask Last.fm about).
+-- explicit taste feedback, the only place a user's opinion rather than their
+-- play history enters the recommender.
+--   block  never recommend this artist, and never seed similars off it
+--   seed   treat it like a most-played artist and go find more like it
+-- read by _refresh_recommendations (taste vector and exclusion set) and
+-- _widen_candidate_pool (which artists to ask about).
 CREATE TABLE artist_feedback (
     user_id     INTEGER REFERENCES users(id) NOT NULL,
     artist_name TEXT NOT NULL,
     verdict     TEXT NOT NULL CHECK (verdict IN ('block', 'seed')),
-    -- when the similar-artist lookup last ran for this seed. NULL = pending.
-    -- Without it a seed would re-fetch its similars every pass forever, since
-    -- the tag inserts are NOT EXISTS filtered but the lookups aren't.
+    -- when the similar lookup last ran for this seed. null means pending.
+    -- without it a seed would re-fetch its similars every pass forever, since
+    -- the tag inserts are NOT EXISTS filtered but the lookups are not.
     expanded_at TIMESTAMPTZ
 );
 -- lower(), because the same artist reaches this table from two sources that
--- disagree on casing (scrobbles vs the recommendations cache), the same split
--- that once put artists a user already played back into their own list.
+-- disagree on casing, scrobbles and the recommendations cache. that is the same
+-- split that once put already-played artists back into their own list.
 CREATE UNIQUE INDEX idx_artist_feedback_key
     ON artist_feedback (user_id, lower(artist_name));

@@ -1,12 +1,11 @@
-"""Artist recommender math: pure functions over sparse dicts {tag: value}, no
-numpy, no DB (reads/caching live in sync_service + queries/recommend.py).
+"""recommender math: pure functions over sparse {tag: value} dicts. no numpy,
+no db. reads and caching live in sync_service and queries/recommend.py.
 
-The idea: each artist is a vector over genre tags, a user's taste is the sum
-of their played artists' vectors (each weighted by how much and how recently
-it's been played, see get_user_plays), and unplayed artists are
-ranked by cosine similarity (direction of taste, not volume). TF-IDF discounts
-tags that are on every artist so distinctive matches ("shoegaze") outweigh
-generic ones ("rock").
+each artist is a vector over genre tags. a user's taste is the sum of their
+played artists' vectors, weighted by how much and how recently they played them
+(see get_user_plays). unplayed artists rank by cosine, so direction of taste
+rather than volume. tf-idf discounts tags everyone carries, so "shoegaze"
+outweighs "rock".
 """
 
 import math
@@ -14,9 +13,10 @@ from collections import defaultdict
 
 
 def compute_idf(corpus: dict[str, dict[str, float]]) -> dict[str, float]:
-    """idf per tag = log(total_artists / artists_carrying_the_tag). Common tag,
-    low idf; rare tag, high; a tag on every artist gets 0 and drops out.
-    `corpus` maps artist -> {tag: weight}."""
+    """idf per tag = log(total_artists / artists_with_the_tag).
+
+    common tag low, rare tag high, a tag on every artist gets 0 and drops out.
+    corpus maps artist -> {tag: weight}."""
     n_artists = len(corpus)
     doc_freq: dict[str, int] = defaultdict(int)
     for tags in corpus.values():
@@ -28,9 +28,10 @@ def compute_idf(corpus: dict[str, dict[str, float]]) -> dict[str, float]:
 def build_artist_vectors(
     corpus: dict[str, dict[str, float]], idf: dict[str, float]
 ) -> dict[str, dict[str, float]]:
-    """Each artist's raw tag weights -> a TF-IDF vector {tag: tf * idf}, where
-    TF = weight / the artist's total weight (so artists with many tags are on
-    the same scale as artists with few)."""
+    """raw tag weights -> a tf-idf vector {tag: tf * idf}.
+
+    tf is weight over the artist's total weight, so artists with many tags sit
+    on the same scale as artists with few."""
     vectors: dict[str, dict[str, float]] = {}
     for artist, tags in corpus.items():
         total = sum(tags.values())
@@ -45,14 +46,12 @@ def build_artist_vectors(
 def build_user_vector(
     plays: dict[str, float], artist_vectors: dict[str, dict[str, float]]
 ) -> dict[str, float]:
-    """Sum a user's played artists into one taste vector, each scaled by
-    log(1 + play_score) so a few obsessions don't drown out the rest. Artists we
-    have no vector for are skipped.
+    """sum a user's played artists into one taste vector, each scaled by
+    log(1 + play_score) so a few obsessions don't drown the rest. artists with
+    no vector are skipped.
 
-    `play_score` is per artist. It's a raw count in the unit tests, but in
-    production it's the recency-weighted score from get_user_plays, so the vector
-    reflects current taste. The log compression works the same on either, it just
-    tempers heavy values."""
+    play_score is a raw count in tests and the recency-weighted score from
+    get_user_plays in production. the log tempers heavy values either way."""
     taste: dict[str, float] = defaultdict(float)
     for artist, play_score in plays.items():
         vec = artist_vectors.get(artist)
@@ -65,11 +64,10 @@ def build_user_vector(
 
 
 def cosine(a: dict[str, float], b: dict[str, float]) -> float:
-    """Cosine similarity of two sparse vectors: dot / (|a| * |b|). Returns 0
-    if either vector is empty or zero-length."""
+    """cosine of two sparse vectors, dot / (|a| * |b|). 0 if either is empty."""
     if not a or not b:
         return 0.0
-    # dot product = sum of a[tag]*b[tag] over the tags both vectors share
+    # dot product over the tags both vectors share
     dot = 0.0
     for tag in a:
         if tag in b:
@@ -81,12 +79,10 @@ def cosine(a: dict[str, float], b: dict[str, float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-# How much of the ranking a "more like this" pick takes over, when there is one.
-# Half, because a seed has to actually move the list to mean anything: folded
-# into the taste vector as one more artist it moved scores by 0.002 against a
-# history of hundreds, which is not a feature. At 0.5 the list is half "your
-# taste" and half "the direction you pointed", and dropping the seed puts it
-# straight back. A knob.
+# how much of the ranking a "more like this" pick takes over. half, because a
+# seed has to actually move the list: folded in as one more artist it shifted
+# scores by 0.002 against a history of hundreds. at 0.5 the list is half taste,
+# half the direction you pointed, and dropping the seed puts it straight back.
 SEED_WEIGHT = 0.5
 
 
@@ -97,19 +93,16 @@ def recommend(
     k: int = 20,
     seed_vector: dict[str, float] | None = None,
 ) -> list[tuple[str, float]]:
-    """Top k unplayed artists as (artist, cosine score), best first. Zero
-    scores (no tag overlap) are dropped rather than used as filler.
+    """top k unplayed artists as (artist, score), best first. zero scores mean
+    no tag overlap and are dropped rather than used as filler.
 
-    `seed_vector` is the artists the user explicitly asked for more of, summed
-    the same way a taste vector is. When present, a candidate is scored against
-    both directions and the two are blended, so the list bends toward the pick
-    without abandoning the play history. When absent, this is plain cosine
-    against taste and nothing changes.
+    seed_vector is what the user asked for more of, summed like a taste vector.
+    when present a candidate is scored against both directions and blended, so
+    the list bends toward the pick without abandoning the history.
 
-    The exclusion is case-insensitive. Both sides are canonicalised upstream, but
-    they are canonicalised from different tables (scrobbles vs artist_tags), so
-    matching on the exact string means one disagreement puts an artist the user
-    already plays back into their recommendations. Cheap belt and braces.
+    the exclusion is case-insensitive. both sides are canonicalised upstream but
+    from different tables (scrobbles vs artist_tags), so matching exact strings
+    would let one disagreement recommend an artist the user already plays.
     """
     played = {name.lower() for name in already_played}
     scored = []

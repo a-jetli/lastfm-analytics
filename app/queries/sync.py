@@ -1,5 +1,5 @@
 def get_user(cur, username: str):
-    """Returns (user_id, last_synced_at) for an existing user, or None if new."""
+    """(user_id, last_synced_at) for an existing user, or None if new."""
     cur.execute(
         "SELECT id, last_synced_at FROM users WHERE lastfm_username = %s", (username,)
     )
@@ -15,8 +15,8 @@ def create_user(cur, username: str) -> int:
 
 
 def insert_scrobble(cur, user_id: int, track: dict) -> None:
-    # ON CONFLICT DO NOTHING leans on the UNIQUE(user_id, track_name, listened_at)
-    # constraint in schema.sql. duplicate scrobbles get skipped, not raised.
+    # leans on UNIQUE(user_id, track_name, listened_at) in schema.sql, so a
+    # duplicate scrobble is skipped rather than raised.
     cur.execute(
         """
         INSERT INTO scrobbles (user_id, artist_name, track_name, album_name, listened_at)
@@ -28,19 +28,19 @@ def insert_scrobble(cur, user_id: int, track: dict) -> None:
 
 
 def update_last_synced(cur, user_id: int, synced_at) -> None:
-    # stamped with the sync's start time, not now(). pages come newest first, so a
-    # play scrobbled mid-sync sits on a page we already read. a start-time mark
-    # re-fetches that overlap next sync and ON CONFLICT dedups it. an end-time mark
-    # would skip those plays forever.
+    # stamped with the sync's start, not now(). pages come newest first, so a
+    # play scrobbled mid-sync sits on a page already read. a start-time mark
+    # re-fetches that overlap and ON CONFLICT dedups it. an end-time mark would
+    # skip those plays forever.
     cur.execute(
         "UPDATE users SET last_synced_at = %s WHERE id = %s", (synced_at, user_id)
     )
 
 
 def get_tracks_missing_durations(cur, user_id: int | None = None):
-    """Work list for the duration backfill: (artist, track) pairs in scrobbles
-    but not yet in track_durations. NOT EXISTS makes it incremental. Pass
-    user_id to limit to one user's tracks; omit for the global sweep."""
+    """work list for the duration backfill: (artist, track) pairs in scrobbles
+    but not in track_durations. NOT EXISTS is what makes it incremental. pass
+    user_id for one user, omit it for the global sweep."""
     if user_id is None:
         cur.execute(
             """
@@ -71,8 +71,8 @@ def get_tracks_missing_durations(cur, user_id: int | None = None):
 
 
 def insert_track_duration(cur, artist_name: str, track_name: str, duration_ms: int) -> None:
-    # ON CONFLICT DO NOTHING, so two overlapping passes can't double-insert and a
-    # re-run is harmless. durations don't change.
+    # two overlapping passes cannot double-insert, and a re-run is harmless.
+    # durations do not change.
     cur.execute(
         """
         INSERT INTO track_durations (artist_name, track_name, duration_ms)
@@ -84,8 +84,8 @@ def insert_track_duration(cur, artist_name: str, track_name: str, duration_ms: i
 
 
 def get_artists_missing_tags(cur, user_id: int | None = None):
-    """Work list for the tag backfill: artists in scrobbles with no rows yet
-    in artist_tags. Same shape and user_id semantics as durations above."""
+    """work list for the tag backfill: artists in scrobbles with no rows in
+    artist_tags. same shape and user_id semantics as durations above."""
     if user_id is None:
         cur.execute(
             """
@@ -112,7 +112,7 @@ def get_artists_missing_tags(cur, user_id: int | None = None):
 
 
 def insert_artist_tag(cur, artist_name: str, tag: str, weight: int) -> None:
-    # ON CONFLICT DO NOTHING, so overlapping or re-run passes are idempotent
+    # overlapping or re-run passes stay idempotent
     cur.execute(
         """
         INSERT INTO artist_tags (artist_name, tag, weight)

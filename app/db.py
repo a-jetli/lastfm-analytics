@@ -1,5 +1,4 @@
-"""Postgres connection helper. The one rule: pass values as %s parameters,
-never f-string them into SQL."""
+"""postgres connections. pass values as %s params, never f-string into SQL."""
 
 import os
 import psycopg
@@ -10,8 +9,8 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def get_connection():
-    # new connection per call, no pool - the caller's `with` block closes it.
-    # psycopg_pool is the upgrade if connection churn ever shows up under load.
+    # one connection per call, no pool. the caller's `with` closes it.
+    # psycopg_pool is the upgrade if churn ever shows up under load.
     return psycopg.connect(DATABASE_URL)
 
 

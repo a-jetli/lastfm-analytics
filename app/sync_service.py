@@ -1,11 +1,12 @@
-"""Sync orchestration - when to pull from Last.fm, and doing it safely.
+"""sync orchestration: when to pull from Last.fm, and doing it safely.
 
-Data is fresh for a day. A stale user's query (or a join) kicks off a background
-sync via ensure_fresh(), which waits a moment so the response has something to
-show. An hourly daemon thread sweeps everyone else plus the enrichment
-backfills. Two guards stop a user syncing twice at once: the in-process _active
-map, and a Postgres advisory lock for the cross-process case (tied to the
-connection, so a crash can't strand it).
+data is fresh for a day. a stale user's query, or a join, kicks off a background
+sync through ensure_fresh(), which waits briefly so the response has something
+to show. an hourly daemon thread sweeps everyone else plus the backfills.
+
+two guards stop a user syncing twice at once: the in-process _active map, and a
+postgres advisory lock for the cross-process case. the lock is tied to the
+connection, so a crash cannot strand it.
 """
 
 import logging
@@ -19,13 +20,13 @@ from app.queries import sync as sync_queries
 
 log = logging.getLogger(__name__)
 
-# older than this and the next query re-syncs. the "once a day".
+# older than this and the next query re-syncs
 SYNC_INTERVAL = timedelta(days=1)
-# how long an explicit join (POST /sync) blocks before letting the sync finish
-# in the background. only paid once now reads use wait=False, so keep it short -
-# enough for the first page of scrobbles to land, then the status pill takes over.
+# how long an explicit join blocks before the sync finishes in the background.
+# paid once, since reads use wait=False. long enough for the first page to land,
+# then the status pill takes over.
 WAIT_BUDGET_SECONDS = 4
-# gap between any two Last.fm calls. the ToS gives no number, but serial calls
+# gap between any two Last.fm calls. the tos gives no number, but serial calls
 # at 4/s are polite and have never been throttled.
 PAGE_PAUSE_SECONDS = 0.25
 # scheduler wake interval, so a stale user is picked up within the hour
@@ -35,9 +36,9 @@ RECOMMEND_TOP_N = 20
 
 # user_id -> the thread currently syncing them, in this process
 _active: dict[int, threading.Thread] = {}
-# user_id -> stage: "pulling" (scrobbles) or "enriching" (durations + genre
-# tags, the slow part). lets the status endpoint say what's happening rather
-# than show a frozen play count. shares _active_lock.
+# user_id -> "pulling" (scrobbles) or "enriching" (durations and tags, the slow
+# part), so the status endpoint can say what is happening instead of showing a
+# frozen play count. shares _active_lock.
 _phase: dict[int, str] = {}
 _active_lock = threading.Lock()
 
@@ -51,7 +52,7 @@ def _set_phase(user_id: int, phase: str | None) -> None:
 
 
 def sync_phase(user_id: int) -> str | None:
-    """Current sync stage for a user, or None if no sync is running."""
+    """current sync stage for a user, or None if nothing is running."""
     with _active_lock:
         return _phase.get(user_id)
 
@@ -64,9 +65,10 @@ def _is_stale(last_synced_at) -> bool:
 
 
 def is_syncing(user_id: int) -> bool:
-    """True if a sync thread for this user is running in this process. Blind to
-    other processes - the advisory lock is the real guard. Accurate on a
-    single-process deploy, which is what we run."""
+    """true if a sync thread for this user is running in this process.
+
+    blind to other processes, where the advisory lock is the real guard. exact
+    on a single-process deploy, which is what we run."""
     with _active_lock:
         thread = _active.get(user_id)
         return bool(thread and thread.is_alive())
@@ -74,21 +76,20 @@ def is_syncing(user_id: int) -> bool:
 
 def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = False,
                  wait: bool = True) -> None:
-    """Kick a sync if the data is new, stale or `force`, then block up to
-    WAIT_BUDGET_SECONDS. `force` is an explicit Load press; the sync stays
-    incremental so it's cheap anyway.
+    """kick a sync if the data is new, stale or forced, then block up to
+    WAIT_BUDGET_SECONDS. force is an explicit Load press, and the sync stays
+    incremental so it is cheap anyway.
 
-    `wait=False` never blocks, which is what analytics reads use. The budget gets
-    paid once on the join - otherwise a page fetching a dozen panels pays it a
-    dozen times and the loading screen takes half a minute."""
+    wait=False never blocks, which is what analytics reads use. the budget is
+    paid once on the join, or a page fetching a dozen panels would pay it a
+    dozen times and take half a minute to load."""
     with _active_lock:
         thread = _active.get(user_id)
         if thread and thread.is_alive():
-            # already in flight - wait on it below, don't start a second
+            # already in flight, so wait on it below rather than start a second
             pass
         elif force or _is_stale(last_synced_at):
-            # incremental if we've synced before (only plays after the mark),
-            # full backfill if not (since = None)
+            # incremental if we have synced before, full backfill if not
             since = int(last_synced_at.timestamp()) if last_synced_at else None
             thread = threading.Thread(
                 target=_run_sync, args=(user_id, username, since), daemon=True
@@ -98,18 +99,18 @@ def ensure_fresh(user_id: int, username: str, last_synced_at, force: bool = Fals
         else:
             return  # fresh, nothing to do
     if not wait:
-        return  # sync is running in the background; caller reads what's committed
-    # wait outside the lock so other users aren't blocked. if the sync isn't done
-    # in WAIT_BUDGET_SECONDS the thread keeps going, we just return what's there.
+        return  # running in the background, the caller reads what is committed
+    # wait outside the lock so other users are not blocked. if the sync is not
+    # done in time the thread keeps going and we return what is there.
     thread.join(timeout=WAIT_BUDGET_SECONDS)
 
 
 def join(username: str, force: bool = False, wait: bool = True) -> tuple[int, bool]:
-    """Resolve `username` to a user id, creating and syncing on first sight.
-    Returns (user_id, is_new).
+    """resolve `username` to a user id, creating and syncing on first sight.
+    returns (user_id, is_new).
 
-    A new handle is checked against Last.fm before its row is created, so a typo
-    leaves no phantom user. A transient outage during that check is swallowed
+    a new handle is checked against Last.fm before its row is created, so a typo
+    leaves no phantom user. a transient outage during that check is swallowed
     rather than blocking the join on a blip.
     """
     with db.get_connection() as conn, conn.cursor() as cur:
@@ -134,44 +135,43 @@ def join(username: str, force: bool = False, wait: bool = True) -> tuple[int, bo
 
 
 def _run_sync(user_id: int, username: str, since: int | None) -> None:
-    """Background worker: fetch pages, store them, advance the high-water mark.
-    Runs on its own DB connection so its commits are visible to live queries."""
+    """background worker: fetch pages, store them, advance the high-water mark.
+    runs on its own connection so its commits are visible to live queries."""
     me = threading.current_thread()
     try:
         with db.get_connection() as conn, conn.cursor() as cur:
             # cross-process guard: one process per user at a time
             cur.execute("SELECT pg_try_advisory_lock(%s)", (user_id,))
             if not cur.fetchone()[0]:
-                return  # another process already has it
+                return  # another process already holds it
             synced = False
             try:
-                _set_phase(user_id, "pulling")  # fetching scrobble pages
+                _set_phase(user_id, "pulling")
                 _paginate(conn, cur, user_id, username, since)
                 synced = True
             finally:
-                # session-level lock survives the per-page commits, so release it
-                # explicitly (closing the connection would do it too)
+                # a session-level lock survives the per-page commits, so release
+                # it explicitly. closing the connection would also do it.
                 cur.execute("SELECT pg_advisory_unlock(%s)", (user_id,))
-        # enrich the new tracks right away, still on the background thread, so
-        # /hours and genre features work after a fresh sync. slow stage - one
-        # Last.fm call per new track/artist - hence its own phase, so the UI can
-        # say "adding genres" instead of looking stuck.
+        # enrich the new tracks right away, still on this thread, so /hours and
+        # the genre views work after a fresh sync. one Last.fm call per new
+        # track and artist makes this the slow stage, hence its own phase.
         if synced:
             _set_phase(user_id, "enriching")
             _backfill_durations(user_id)
             _backfill_artist_tags(user_id)
     except lastfm.LastfmUserNotFound:
-        # handle vanished from Last.fm (deleted, renamed). nothing to pull, leave
-        # what's there. typos get caught earlier in join(), so this only happens
+        # the handle vanished, deleted or renamed. nothing to pull, so leave what
+        # is there. typos are caught in join(), so this only happens when
         # refreshing a user who used to be valid.
         log.warning("Last.fm no longer knows user_id=%s (%s)", user_id, username)
     except Exception:
-        # a failed sync leaves last_synced_at alone -> still stale -> retried on
-        # the next query. never let a background error take the app down.
+        # a failed sync leaves last_synced_at alone, so the user stays stale and
+        # the next query retries. a background error must never take the app down.
         log.exception("sync failed for user_id=%s", user_id)
     finally:
-        # drop out of the active map and clear the phase, but only if we're
-        # still the current entry
+        # leave the active map and clear the phase, but only if we are still the
+        # current entry
         with _active_lock:
             if _active.get(user_id) is me:
                 del _active[user_id]
@@ -179,13 +179,13 @@ def _run_sync(user_id: int, username: str, since: int | None) -> None:
 
 
 def _paginate(conn, cur, user_id: int, username: str, since: int | None) -> None:
-    """Walk Last.fm pages newest first, committing each one so recent plays show
-    up first during the loading window. The mark only moves at the end, and to
-    the start time - see update_last_synced for why."""
+    """walk pages newest first, committing each one so recent plays appear
+    during the loading window. the mark moves only at the end, and to the start
+    time. see update_last_synced for why."""
     started_at = datetime.now(timezone.utc)
     tracks, total_pages = lastfm.getrecents(username, page=1, since=since)
     _store_page(cur, user_id, tracks)
-    conn.commit()  # page 1 (newest) hits live queries right away
+    conn.commit()  # the newest page hits live queries right away
 
     for page in range(2, total_pages + 1):
         tracks, _ = lastfm.getrecents(username, page=page, since=since)
@@ -193,30 +193,30 @@ def _paginate(conn, cur, user_id: int, username: str, since: int | None) -> None
         conn.commit()
         time.sleep(PAGE_PAUSE_SECONDS)
 
-    # pull is complete, so move the high-water mark forward
+    # the pull finished, so move the high-water mark forward
     sync_queries.update_last_synced(cur, user_id, started_at)
     conn.commit()
 
 
 def _store_page(cur, user_id: int, tracks: list) -> None:
-    # ON CONFLICT DO NOTHING in insert_scrobble makes re-inserts harmless, so
-    # overlapping pages or a re-run never duplicate rows
+    # insert_scrobble is ON CONFLICT DO NOTHING, so overlapping pages or a
+    # re-run never duplicate rows
     for track in tracks:
         sync_queries.insert_scrobble(cur, user_id, track)
 
 
-# --- daily background refresh (the "once a day" job, no external cron) -------
+# periodic background refresh. no external cron.
 
 
 def start_scheduler() -> None:
-    """Start the hourly maintenance loop, called on app startup. Daemon thread,
-    so it only runs while the app process is up."""
+    """start the hourly maintenance loop, called on app startup. daemon thread,
+    so it lives exactly as long as the process."""
     threading.Thread(target=_scheduler_loop, name="daily-sync", daemon=True).start()
 
 
 def _scheduler_loop() -> None:
-    # sleep first so a fresh boot (and short test runs) don't immediately hammer
-    # Last.fm, then run the pass over and over
+    # sleep first so a fresh boot, or a short test run, does not immediately
+    # hammer Last.fm
     while True:
         time.sleep(SCHEDULER_TICK_SECONDS)
         try:
@@ -226,64 +226,61 @@ def _scheduler_loop() -> None:
 
 
 def _maintenance_pass() -> None:
-    """One maintenance pass per scheduler tick.
+    """one maintenance pass per scheduler tick.
 
-    Order matters: sync first so new tracks/artists exist before the enrichment
-    steps look for them, recommendations after the tags they score against, top
+    order matters: sync first so new tracks and artists exist before enrichment
+    looks for them, recommendations after the tags they score against, top
     tracks last so newly recommended artists get songs too.
 
-    Every step is incremental (work list = rows not yet enriched) and global (one
-    lookup per artist/track, shared across users), so the corpus grows on its own
-    from what people actually play. No crawler, which is what keeps stored
-    Last.fm data under the ToS 100MB cap by construction.
+    every step is incremental (the work list is rows not yet enriched) and global
+    (one lookup per artist or track, shared across users), so the corpus grows
+    from what people actually play. no crawler, which is what keeps stored data
+    under the 100MB tos cap by construction.
     """
     _sync_all_stale()
     _backfill_durations()
     _backfill_artist_tags()
-    _widen_candidate_pool()  # before recommendations - it's what they score against
+    _widen_candidate_pool()  # before recommendations, it is what they score against
     _refresh_recommendations()
     _backfill_top_tracks()
 
 
 def _widen_candidate_pool() -> None:
-    """Pull in artists nobody here has played, so there's something to recommend.
+    """pull in artists nobody here has played, so there is something to recommend.
 
-    Every other artist in the corpus arrives through scrobbles, which makes the
+    every other artist in the corpus arrives through scrobbles, which makes the
     recommender useless at low user counts: candidates are "tagged artists you
-    haven't played", and with one user that set is empty by construction. On the
+    have not played", and at one user that set is empty by construction. on the
     live box it produced exactly one recommendation.
 
-    Per user: take their top SEED_ARTISTS plus any artist they explicitly asked
-    for more of, ask Last.fm for SIMILAR_PER_ARTIST similar artists each, drop
-    everything already known, fetch tags for the rest. The new rows are
-    artist_tags only with no scrobbles attached, which is what makes them
-    recommendable rather than already played.
+    per user: take their top SEED_ARTISTS plus anything they asked for more of,
+    ask for SIMILAR_PER_ARTIST similars each, drop everything already known, and
+    fetch tags for the rest. the new rows are artist_tags with no scrobbles
+    attached, which is what makes them recommendable rather than already played.
 
-    Cost is bounded and shrinks. The work list is filtered by NOT EXISTS, so a
-    user's first pass fetches up to SEED_ARTISTS * SIMILAR_PER_ARTIST names and
-    later ones fetch almost none as the corpus converges. Tag rows are tiny (a
-    name, a tag, an int), so this stays well inside the ToS 100MB cap. The real
-    cost is call volume, which the pause below keeps polite.
+    the cost is bounded and shrinks. the work list is NOT EXISTS filtered, so a
+    first pass fetches up to SEED_ARTISTS * SIMILAR_PER_ARTIST names and later
+    ones fetch almost none. tag rows are tiny, so this stays well inside the
+    100MB cap. the real cost is call volume, which the pause below keeps polite.
     """
     with db.get_connection() as conn, conn.cursor() as cur:
         user_ids = recommend_queries.get_all_user_ids(cur)
 
     for user_id in user_ids:
         with db.get_connection() as conn, conn.cursor() as cur:
-            # a "more like this" the pass hasn't looked up yet is always worth a
-            # call, however full the list already is - it's the user asking for a
-            # direction the play history doesn't point in.
+            # a "more like this" the pass has not looked up is always worth a
+            # call, however full the list is. it is the user asking for a
+            # direction the play history does not point in.
             pending = recommend_queries.get_pending_seeds(cur, user_id)
-            # otherwise skip users the pool already serves. without this the 10
-            # getSimilar calls below repeat every tick, per user, forever,
-            # learning nothing: the tag fetches stop (NOT EXISTS) but the seed
-            # lookups don't.
+            # otherwise skip users the pool already serves. without this the
+            # getSimilar calls below repeat every tick, per user, forever: the
+            # tag fetches stop on NOT EXISTS but the seed lookups do not.
             if not pending and (
                 len(recommend_queries.get_recommendations(cur, user_id)) >= RECOMMEND_TOP_N
             ):
                 continue
-            # dict.fromkeys-style dedupe on lowercase: a seed that's also a top
-            # artist is one lookup, not two
+            # dedupe on lowercase, so a seed that is also a top artist costs one
+            # lookup rather than two
             seeds = list({
                 name.lower(): name
                 for name in pending + recommend_queries.get_top_artists(cur, user_id)
@@ -296,19 +293,19 @@ def _widen_candidate_pool() -> None:
                     seed, limit=recommend_queries.SIMILAR_PER_ARTIST
                 )
             except Exception:
-                # one bad lookup mustn't abort the pass, retried next tick
+                # one bad lookup must not abort the pass, retried next tick
                 log.exception("similar-artist fetch failed for %s", seed)
             time.sleep(PAGE_PAUSE_SECONDS)
 
-        # dedupe the batch before asking the DB, so a name several seeds suggest
-        # costs one filter check and one tag fetch instead of five
+        # dedupe before asking the db, so a name several seeds suggest costs one
+        # filter check and one tag fetch rather than five
         seen: dict[str, str] = {}
         for name in similar:
             seen.setdefault(name.lower(), name)
 
-        # one connection for the filter and the whole insert loop, committing per
-        # artist, same as _backfill_artist_tags. one per artist meant ~90 connects
-        # on a user's first pass for nothing.
+        # one connection for the filter and the whole insert loop, committing
+        # per artist, like _backfill_artist_tags. one per artist meant ~90
+        # connects on a first pass for nothing.
         with db.get_connection() as conn, conn.cursor() as cur:
             unknown = recommend_queries.filter_unknown_artists(cur, list(seen.values()))
             for artist_name in unknown:
@@ -321,8 +318,8 @@ def _widen_candidate_pool() -> None:
                     for tag, weight in tags:
                         sync_queries.insert_artist_tag(cur, artist_name, tag, weight)
                 else:
-                    # same sentinel the scrobble-driven backfill uses: asked,
-                    # nothing there. filter_unknown_artists stops returning it.
+                    # same sentinel the scrobble backfill uses: asked, nothing
+                    # there. filter_unknown_artists stops returning it.
                     sync_queries.insert_artist_tag(cur, artist_name, "", 0)
                 conn.commit()
                 time.sleep(PAGE_PAUSE_SECONDS)
@@ -332,17 +329,18 @@ def _widen_candidate_pool() -> None:
 
 
 def _backfill_durations(user_id: int | None = None) -> None:
-    """Durations for tracks not yet in track_durations. Commits per row so an
-    interrupted pass keeps its progress, and stores 0 ms so we don't re-ask.
-    Pass user_id right after a sync, omit it for the periodic sweep."""
+    """durations for tracks not yet in track_durations.
+
+    commits per row so an interrupted pass keeps its progress, and stores 0 ms so
+    we do not re-ask. pass user_id right after a sync, omit it for the sweep."""
     with db.get_connection() as conn, conn.cursor() as cur:
         pairs = sync_queries.get_tracks_missing_durations(cur, user_id)
         for artist_name, track_name in pairs:
             try:
                 duration_ms = lastfm.get_track_info(artist_name, track_name)
             except Exception:
-                # not stored -> retried next pass. one bad lookup (network blip,
-                # odd response) mustn't take down the whole backfill.
+                # not stored, so it is retried next pass. one bad lookup must not
+                # take down the whole backfill.
                 log.exception(
                     "duration fetch failed for %s - %s", artist_name, track_name
                 )
@@ -353,42 +351,42 @@ def _backfill_durations(user_id: int | None = None) -> None:
 
 
 def _backfill_artist_tags(user_id: int | None = None) -> None:
-    """Fetch genre tags for artists not yet in artist_tags, raw - cleaning happens
-    at read time. An artist with no tags gets a sentinel row (tag='') so it isn't
-    re-fetched. Same user_id semantics as _backfill_durations."""
+    """genre tags for artists not yet in artist_tags, stored raw. cleaning
+    happens at read time. an artist with no tags gets a sentinel row so it is not
+    re-fetched. same user_id semantics as _backfill_durations."""
     with db.get_connection() as conn, conn.cursor() as cur:
         artists = sync_queries.get_artists_missing_tags(cur, user_id)
         for (artist_name,) in artists:
             try:
                 tags = lastfm.get_artist_tags(artist_name)
             except Exception:
-                # not stored -> retried next pass. one bad lookup mustn't abort.
+                # not stored, so it is retried next pass
                 log.exception("tag fetch failed for %s", artist_name)
                 continue
             if tags:
                 for tag, weight in tags:
                     sync_queries.insert_artist_tag(cur, artist_name, tag, weight)
             else:
-                # "asked, none found" marker so NOT EXISTS stops returning it
+                # an "asked, none found" marker so NOT EXISTS stops returning it
                 sync_queries.insert_artist_tag(cur, artist_name, "", 0)
             conn.commit()
             time.sleep(PAGE_PAUSE_SECONDS)
 
 
 def _refresh_recommendations() -> None:
-    """Recompute every user's cached artist recommendations.
+    """recompute every user's cached artist recommendations.
 
-    The shared work (corpus load, idf, all artist vectors) happens once and gets
-    reused for every user. Only the taste vector and ranking are per-user. Math
-    lives in app/recommender.py.
+    the shared work (corpus load, idf, every artist vector) happens once and is
+    reused for all users. only the taste vector and the ranking are per user.
+    the math is in app/recommender.py.
 
-    Explicit feedback folds into the two inputs the math already takes: a seed
-    joins the play scores, a block joins the exclusion set. No special case in
+    explicit feedback folds into the two inputs the math already takes: a seed
+    joins the play scores, a block joins the exclusion set. no special case in
     the recommender itself."""
     with db.get_connection() as conn, conn.cursor() as cur:
         corpus_rows = recommend_queries.get_tag_corpus(cur)
         if not corpus_rows:
-            return  # no tags yet, nothing to recommend against
+            return  # no tags yet, nothing to score against
         # fold flat (artist, tag, weight) rows into {artist: {tag: weight}}
         corpus: dict[str, dict[str, float]] = {}
         for artist_name, tag, weight in corpus_rows:
@@ -398,17 +396,17 @@ def _refresh_recommendations() -> None:
         artist_vectors = recommender.build_artist_vectors(corpus, idf)
 
         for user_id in recommend_queries.get_all_user_ids(cur):
-            # {artist: recency-weighted play score}. keys are every artist they
-            # have played (the exclusion set), values weight recent plays up.
+            # {artist: recency-weighted play score}. the keys are every artist
+            # they have played, which doubles as the exclusion set.
             plays = dict(recommend_queries.get_user_plays(cur, user_id))
             user_vector = recommender.build_user_vector(plays, artist_vectors)
             if not user_vector:
-                continue  # no tagged artists yet, skip and leave the cache
+                continue  # no tagged artists yet, so leave the cache alone
             seeds = recommend_queries.get_feedback_names(cur, user_id, "seed")
             blocked = recommend_queries.get_feedback_names(cur, user_id, "block")
             # seeds are picks, not plays, so they carry equal weight rather than
-            # a count. same builder as the taste vector, so recommend() is
-            # comparing like with like.
+            # a count. same builder as the taste vector, so recommend() compares
+            # like with like.
             seed_vector = (
                 recommender.build_user_vector({name: 1.0 for name in seeds}, artist_vectors)
                 if seeds else None
@@ -416,8 +414,8 @@ def _refresh_recommendations() -> None:
             ranked = recommender.recommend(
                 user_vector,
                 artist_vectors,
-                # a seeded artist is excluded from its own results: they've
-                # already told us they like it
+                # a seeded artist is excluded from its own results, since they
+                # have already said they like it
                 already_played=set(plays) | set(seeds) | set(blocked),
                 k=RECOMMEND_TOP_N,
                 seed_vector=seed_vector,
@@ -427,10 +425,9 @@ def _refresh_recommendations() -> None:
 
 
 def _backfill_top_tracks() -> None:
-    """Fetch and store each wanted artist's top tracks - the work-list query says
-    which artists qualify. Same loop shape as the other backfills: per-row commit,
-    per-call pause, one bad lookup never aborts the pass. An unknown artist gets a
-    sentinel row (track_name='') so it isn't re-fetched."""
+    """top tracks for each wanted artist. the work-list query decides who
+    qualifies. same loop shape as the other backfills: per-row commit, per-call
+    pause, one bad lookup never aborts. an unknown artist gets a sentinel row."""
     with db.get_connection() as conn, conn.cursor() as cur:
         artists = recommend_queries.get_artists_missing_top_tracks(cur)
         for (artist_name,) in artists:
@@ -449,9 +446,10 @@ def _backfill_top_tracks() -> None:
 
 
 def _sync_all_stale() -> None:
-    """Sync every user whose data is over a day old, one at a time. Reuses the
-    same incremental sync and advisory lock as on-demand syncs, so a scheduled
-    pass and a live query can't double-fetch each other."""
+    """sync every user whose data is over a day old, one at a time.
+
+    reuses the same incremental sync and advisory lock as on-demand syncs, so a
+    scheduled pass and a live query cannot double-fetch each other."""
     with db.get_connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, lastfm_username, last_synced_at FROM users")
         users = cur.fetchall()
@@ -462,10 +460,10 @@ def _sync_all_stale() -> None:
 
 
 if __name__ == "__main__":
-    # one maintenance pass now instead of waiting an hour for the scheduler. use
-    # it after a deploy or a fresh join so recommendations and genre data don't
-    # sit empty. safe to re-run any time, every step is incremental and
-    # idempotent. `python -m app.sync_service`, or inside the container
+    # one maintenance pass now instead of waiting an hour for the scheduler.
+    # use it after a deploy or a fresh join so recommendations and genre data do
+    # not sit empty. safe to re-run any time, every step is idempotent.
+    # `python -m app.sync_service`, or in the container
     # `docker compose exec app python -m app.sync_service`.
     logging.basicConfig(level=logging.INFO)
     log.info("running one maintenance pass on demand")

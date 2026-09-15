@@ -9,9 +9,9 @@
   (function () { try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'light'); } catch (e) {} })();
 </script>
 <style>
-  /* Cool Gradient Skies. violet #6331FF accent, peach #FFB68A against it,
-     #000001 and #CEC8FA at the ends. light mode sits on the lavender end of
-     the ramp, dark on the indigo end - one palette, not two schemes. */
+  /* cool gradient skies. violet #6331FF accent, peach #FFB68A against it,
+     #000001 and #CEC8FA at the ends. light mode sits on the lavender end of the
+     ramp, dark on the indigo end. one palette, not two schemes. */
   :root {
     --bg: #f6f5fe; --bg-2: #ffffff; --raise: #ffffff;
     --ink: #09002c; --ink-2: #47179a; --muted: #595f61;
@@ -56,9 +56,9 @@
     color: var(--ink); padding: 7px 13px 7px 11px; border-radius: 999px;
     background: color-mix(in srgb, var(--accent) 14%, var(--bg-2));
     border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); }
-  /* Three-bar EQ. One pseudo-element, three gradient layers; the animation steps
-     the background-size list so one bar is tall per 0.5s frame. No extra DOM,
-     which matters because the JS sets #status with textContent. */
+  /* three-bar eq. one pseudo-element, three gradient layers, and the animation
+     steps the background-size list so one bar is tall per 0.5s frame. no extra
+     dom, which matters because the js sets #status with textContent. */
   #status:not(:empty)::before { content: ""; width: 13px; height: 10px;
     background-image: linear-gradient(var(--accent), var(--accent)),
                       linear-gradient(var(--accent), var(--accent)),
@@ -87,13 +87,13 @@
   #landing a:hover { border-bottom-color: var(--accent); }
   #landing .hint { color: var(--muted); font-size: 14px; margin-top: 26px; }
 
-  /* Scroll containers that exist to slide sideways on a narrow screen, never to
-     be scrolled by the bar itself. macOS with a mouse attached reserves layout
-     space for a permanent bar, which on the tab strip is a stray vertical line
-     and under the heatmap is a grey slab eating a row of cells. Wheel, trackpad
-     and touch all still work.
-     overflow-y:hidden on the tab strip is load-bearing: with overflow-x:auto and
-     overflow-y left at visible, CSS promotes the y axis to auto too, which is
+  /* scroll containers that slide sideways on a narrow screen, never scrolled by
+     the bar itself. macos with a mouse attached reserves layout space for a
+     permanent bar, which on the tab strip is a stray vertical line and under the
+     heatmap is a grey slab eating a row of cells. wheel, trackpad and touch all
+     still work.
+     overflow-y:hidden on the tab strip matters: with overflow-x:auto and
+     overflow-y left at visible, css promotes the y axis to auto too, which is
      where that vertical bar came from in the first place. */
   nav.tabs, .hm-scroll, .scroll { scrollbar-width: none; }
   nav.tabs::-webkit-scrollbar, .hm-scroll::-webkit-scrollbar,
@@ -129,6 +129,8 @@
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 26px; }
   .stat .n { font-family: var(--display); font-size: 42px; font-weight: 600; line-height: 1; }
   .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-top: 7px; }
+  /* the live half of a tile: the lifetime number above never changes, this does. */
+  .stat .s { font-size: 12.5px; color: var(--ink-2); margin-top: 5px; }
 
   /* bar chart */
   .chart { display: flex; align-items: flex-end; gap: 7px; height: 200px; padding-top: 22px; }
@@ -227,7 +229,7 @@
   .tlink, .alink { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
   .tlink:hover, .alink:hover { border-bottom-color: var(--accent); color: var(--accent); }
 
-  /* For you */
+  /* for you */
   .reclist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .rec { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 16px; padding: 15px 0;
          border-top: 1px solid var(--line); align-items: start; }
@@ -398,7 +400,7 @@
   </header>
 
   <section id="landing">
-    <h2>I wanted <span>longer history</span> and <span>more insights</span> from my music platforms, so I built the tool I'd want, and it works for anyone.</h2>
+    <h2>I wanted access to more history and analytics from my music streaming platforms. I built <span>Rotation</span> to solve that problem.</h2>
     <p>To start, log in or sign up at <a href="https://www.last.fm/join" target="_blank" rel="noopener">last.fm</a> and connect to whatever services you stream on. Everything you play after that gets tracked, letting you explore your full history, streaks, genres, trends, binges, taste shifts, and more.</p>
     <p>This app works through Last.fm to consolidate all your streams across a single usable API. Sign up, connect your accounts, and the app does the rest.</p>
     <p>Note that data collection only starts once you sign up and connect your accounts, so anything you played before that is invisible to the application.</p>
@@ -419,8 +421,8 @@
       <div class="stats">
         <div class="stat"><div class="n" id="t-plays"></div><div class="l">total plays</div></div>
         <div class="stat"><div class="n" id="t-hours"></div><div class="l">hours listened</div></div>
-        <div class="stat"><div class="n" id="t-streak"></div><div class="l">longest streak (days)</div></div>
-        <div class="stat"><div class="n" id="t-artists"></div><div class="l">artists played</div></div>
+        <div class="stat"><div class="n" id="t-streak"></div><div class="l">longest streak (days)</div><div class="s" id="s-streak"></div></div>
+        <div class="stat"><div class="n" id="t-artists"></div><div class="l">artists played</div><div class="s" id="s-artists"></div></div>
       </div>
       <section class="block">
         <div class="head"><h3>Plays</h3><span class="cap" id="bars-cap"></span>
@@ -664,10 +666,10 @@ const RANGE_RENDER = {
 const PERIODS = [{label: 'Weekly', v: 'week'}, {label: 'Monthly', v: 'month'}];
 const period = {report: 'week', hours: 'week'};
 
-// Every fetch below reads the pickers at call time, so a response can land after
-// the user has moved one. Rendering it then paints stale rows under a fresh
-// label - a week-bucketed chart captioned "by month, last 12". Snapshot the
-// pickers with the request and drop the response if they've moved since; the
+// every fetch below reads the pickers at call time, so a response can land after
+// the user has moved one. rendering it then paints stale rows under a fresh
+// label, like a week-bucketed chart captioned "by month, last 12". snapshot the
+// pickers with the request and drop the response if they moved since. the
 // handler that moved them has already drawn the right thing.
 const pickersKey = () => JSON.stringify([range, period]);
 
@@ -856,6 +858,30 @@ $('form').addEventListener('submit', async e => {
 const MATCH_FULL = 0.5;  // cosine treated as a full bar; the meter is a fraction of this
 const matchLabel = s => s >= 0.40 ? 'strong' : s >= 0.28 ? 'solid' : s >= 0.16 ? 'moderate' : 'loose';
 
+// sub-lines under the stat tiles, all from data the overview already fetched.
+// no extra requests.
+function drawStatSubs(streaks, discovery) {
+  const today = isoDate(new Date());   // browser-local, matching the ?tz= the queries bucketed in
+  const thisMonth = today.slice(0, 7);
+  // the series are oldest first and only hold months that HAVE plays, so the
+  // last row is the latest active month. early in a quiet month that is the
+  // month before, and calling it "this month" would be a lie.
+  const latest = rows => rows.length && String(rows[rows.length - 1].month).slice(0, 7) === thisMonth
+    ? rows[rows.length - 1] : null;
+
+  // a run counts as current if it reaches today or yesterday. you have not
+  // broken a streak at 9am, you just have not played yet.
+  const newest = streaks.reduce((best, r) => (!best || r.end_day > best.end_day ? r : best), null);
+  const run = newest && (newest.end_day === today || newest.end_day === addDays(today, -1))
+    ? newest.length_days : 0;
+  $('s-streak').textContent = !streaks.length ? ''   // no history yet, or still syncing
+    : run ? `current streak: ${run} ${run === 1 ? 'day' : 'days'}`
+    : 'no active streak';
+
+  const a = latest(discovery);
+  $('s-artists').textContent = a ? `${a.new_artists.toLocaleString()} new this month` : '';
+}
+
 function render(d) {
   const report = d.report || [], streaks = d.streaks || [], discovery = d.discovery || [];
   const clock = d.clock || [], hours = d.hours || [], loyalty = d.loyalty || [];
@@ -868,6 +894,7 @@ function render(d) {
   $('t-hours').textContent = Math.round(hours.reduce((s, m) => s + Number(m.hours || 0), 0)).toLocaleString();
   $('t-streak').textContent = streaks.length ? Math.max(...streaks.map(s => s.length_days)) : 0;
   $('t-artists').textContent = discovery.reduce((s, m) => s + m.new_artists, 0).toLocaleString();
+  drawStatSubs(streaks, discovery);
 
   drawPlays(report);
   drawHours(hours);
@@ -1129,9 +1156,9 @@ function drawClock(rows) {
 
 // grey out an arrow at the end it can't move past, so the strip's extent is
 // visible now that there's no scrollbar to show it. `at` is where the strip is
-// HEADING: a smooth scroll is still animating when the click handler calls
-// this, so reading scrollLeft would judge the buttons on the old position and
-// leave the one you just moved away from disabled.
+// a smooth scroll is still animating when the click handler calls this, so
+// reading scrollLeft would judge the buttons on the old position and leave the
+// one you just moved away from disabled.
 function updateClockArrows(at) {
   const sc = $('clock').querySelector('.hm-scroll');
   if (!sc) return;

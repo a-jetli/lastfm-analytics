@@ -1,33 +1,33 @@
-# CI + CD. Two jobs, one file:
+# ci and cd. two jobs, one file:
 #   test    run the suite on every push and pull request
-#   deploy  ship main to the EC2 box, ONLY if test passed
+#   deploy  ship main to the ec2 box, only if test passed
 #
-# One file because `needs:` only works between jobs in the same workflow, and
+# one file because `needs:` only works between jobs in the same workflow, and
 # that dependency is what makes this a pipeline rather than two automations.
-# This is continuous DEPLOYMENT (unattended); swap the push condition on deploy
-# for workflow_dispatch to get delivery-with-a-button instead.
-# Design notes: notes/CD_PLAN.md
+# this is continuous deployment, unattended. swap the push condition on deploy
+# for workflow_dispatch to get delivery with a button instead.
+# design notes: notes/CD_PLAN.md
 name: ci-cd
 on: [push, pull_request]
 
 jobs:
   # ---------------------------------------------------------------- CI ------
-  # Most of the suite is SQL against a real Postgres, so a service container
-  # runs beside the job. No skip-if-missing: if it fails to start, the tests
-  # fail. A green check on a run that never touched the SQL is worse than red.
+  # most of the suite is sql against a real postgres, so a service container runs
+  # beside the job. no skip-if-missing: if it fails to start, the tests fail. a
+  # green check on a run that never touched the sql is worse than a red one.
   test:
     runs-on: ubuntu-latest
 
     services:
       postgres:
-        # Same major version as docker-compose.yml and the deployed box, so the
-        # tests can't pass here against SQL the production server would reject.
+        # same major version as docker-compose.yml and the deployed box, so the
+        # tests cannot pass here against sql production would reject.
         image: postgres:18
         env:
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
-        # Without this the job can start connecting before Postgres is up.
+        # without this the job can start connecting before postgres is up
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
@@ -41,28 +41,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      # httpx is test-only (TestClient runs on it) and stays out of
-      # requirements.txt so it can't reach the runtime image. Pinned so an
-      # upstream release can't turn this red with no commit behind it.
+      # httpx is test-only, since TestClient runs on it, and stays out of
+      # requirements.txt so it cannot reach the runtime image. pinned so an
+      # upstream release cannot turn this red with no commit behind it.
       - name: Install
         run: pip install -r requirements.txt pytest==9.1.1 httpx==0.28.1
 
       - name: Test
-        # Points the tests at the service container; they create and drop
-        # their own lastfm_test database off it.
+        # points the tests at the service container. they create and drop their
+        # own lastfm_test database off it.
         run: pytest -q
         env:
           TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
   # ---------------------------------------------------------------- CD ------
-  # Rudimentary on purpose: ssh in and run the commands you'd type by hand, so
-  # the fallback when this breaks is obvious. INERT until the repo variable
-  # DEPLOY_ENABLED=true exists. Server setup + secrets: notes/CD_PLAN.md
+  # rudimentary on purpose: ssh in and run the commands you would type by hand,
+  # so the fallback when this breaks is obvious. inert until the repo variable
+  # DEPLOY_ENABLED=true exists. server setup and secrets: notes/CD_PLAN.md
   deploy:
-    needs: test # THE line. No green tests, no deploy.
+    needs: test  # the line that matters. no green tests, no deploy.
     runs-on: ubuntu-latest
-    # Three guards: pushes only (a pull request must never deploy), main only,
-    # and the kill switch so this stays dormant until the box exists.
+    # three guards: pushes only, since a pull request must never deploy, main
+    # only, and a kill switch so this stays dormant until the box exists.
     if: >-
       github.event_name == 'push'
       && github.ref == 'refs/heads/main'
@@ -72,32 +72,32 @@ jobs:
       - name: Load the SSH key
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          # A file, not an argument: command lines show in the process list.
+          # a file, not an argument. command lines show in the process list.
           printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
-          # Trust on first use: protects against a MITM appearing later, not
-          # one present right now. Fine for a box you own.
+          # trust on first use. protects against a mitm appearing later, not one
+          # present right now. fine for a box you own.
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Pull and restart on the box
-        # --build means the image is built ON the 1 GB instance, which also
-        # runs Postgres. Slow but works; Tier 2 in CD_PLAN.md moves it here.
+        # --build means the image is built on the 1 gb instance, which also runs
+        # postgres. slow but it works. tier 2 in CD_PLAN.md moves it here.
         run: |
           ssh -i ~/.ssh/deploy "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
             'set -e
              cd ~/lastfm-analytics
              git pull --ff-only
              docker compose up -d --build --remove-orphans
-             # Dangling only, never -a: the previous tagged image is the
-             # rollback, and the free tier disk is 8 GB.
+             # dangling only, never -a. the previous tagged image is the
+             # rollback, and the free tier disk is 8 gb.
              docker image prune -f'
 
       - name: Smoke test
-        # Hits the public hostname, not the instance IP: that is the path a real
-        # visitor takes, so it also proves the Cloudflare tunnel is up, not just
-        # the container. A deploy that reports success while the app 500s is
-        # worse than one that fails. Retried because uvicorn takes a moment to
-        # bind and the tunnel needs a beat to reconnect after the restart.
+        # hits the public hostname, not the instance ip, because that is the
+        # path a real visitor takes. it proves the tunnel is up, not just the
+        # container. a deploy that reports success while the app 500s is worse
+        # than one that fails. retried because uvicorn takes a moment to bind and
+        # the tunnel needs a beat to reconnect.
         run: |
           for i in 1 2 3 4 5; do
             if curl -fsS --max-time 10 "https://rotation.ajetli.com/health"; then

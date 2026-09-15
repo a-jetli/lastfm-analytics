@@ -1,16 +1,16 @@
-"""SQL for the recommender: load the raw material (tag corpus + a user's plays)
-and cache the computed results. The vector math itself is in app/recommender.py
--- this file only moves rows in and out of Postgres, mirroring queries/sync.py.
+"""sql for the recommender: load the raw material (tag corpus, a user's plays)
+and cache the results. the vector math is in app/recommender.py. this file only
+moves rows in and out of postgres, mirroring queries/sync.py.
 """
 
 
 def get_tag_corpus(cur):
-    """Flat (artist, tag, weight) rows for the artist vectors; the caller folds
+    """flat (artist, tag, weight) rows for the artist vectors. the caller folds
     them into {artist: {tag: weight}}.
 
-    Folded on lower(artist_name): split by casing an artist gets two vectors and
-    can win two slots, which put "Tyler, the Creator" and "Tyler, The Creator" in
-    one list.
+    folded on lower(artist_name): split by casing, an artist gets two vectors
+    and can win two slots, which once put "Tyler, the Creator" and "Tyler, The
+    Creator" in one list.
     """
     cur.execute(
         """
@@ -29,8 +29,8 @@ def get_tag_corpus(cur):
     return cur.fetchall()
 
 
-# taste-vector recency half-life in days - a play this old counts half as much as
-# one today. keeps a season dominant without wiping out older favourites. a knob.
+# taste-vector half-life in days. a play this old counts half as much as one
+# today, which keeps a season dominant without wiping out older favourites.
 TASTE_HALF_LIFE_DAYS = 90
 
 
@@ -38,9 +38,9 @@ def get_user_plays(cur, user_id: int):
     """(artist_name, recency_weight) per artist: 0.5 ** (age_days / half-life)
     summed over their plays.
 
-    Every played artist has to appear, since this doubles as the exclusion set,
-    so decay must never reach zero. Grouped on lower(artist_name) like the tag corpus:
-    split by casing, 22 plays of "Charli xcx" failed to exclude "Charli XCX".
+    every played artist must appear, because this doubles as the exclusion set,
+    so the decay can never reach zero. grouped on lower(artist_name) like the
+    corpus: 22 plays of "Charli xcx" once failed to exclude "Charli XCX".
     """
     cur.execute(
         """
@@ -55,15 +55,15 @@ def get_user_plays(cur, user_id: int):
 
 
 def get_all_user_ids(cur):
-    """Every user id. The maintenance pass recomputes recommendations for all."""
+    """every user id. the maintenance pass recomputes all of them."""
     cur.execute("SELECT id FROM users")
     return [row[0] for row in cur.fetchall()]
 
 
 def replace_recommendations(cur, user_id: int, ranked: list[tuple[str, float]]) -> None:
-    """Swap a user's cached recommendations for a freshly computed list. Delete +
-    insert together so a reader never sees a half-written set (the caller commits
-    once after this, making the swap atomic)."""
+    """swap a user's cached recommendations for a fresh list. delete and insert
+    together, and the caller commits once after, so a reader never sees a
+    half-written set."""
     cur.execute("DELETE FROM recommendations WHERE user_id = %s", (user_id,))
     cur.executemany(
         """
@@ -78,9 +78,8 @@ def replace_recommendations(cur, user_id: int, ranked: list[tuple[str, float]]) 
 
 
 def get_recommendations(cur, user_id: int):
-    """Cached recommendations for a user, best first. Empty until the maintenance
-    pass has computed them at least once (same "fills in later" story as
-    durations and tags)."""
+    """cached recommendations, best first. empty until the maintenance pass has
+    run once, same as durations and tags."""
     cur.execute(
         """
         SELECT artist_name, score, rank
@@ -91,32 +90,30 @@ def get_recommendations(cur, user_id: int):
     return cur.fetchall()
 
 
-# --- song recommendations, built on artist_top_tracks, no vector math ---------
+# song recommendations, built on artist_top_tracks. no vector math.
 
-# an artist counts as a "favorite" if it's in the user's top N by plays
+# an artist counts as a favorite if it is in the user's top N by plays
 FAVORITE_ARTISTS = 15
 # per-artist caps on the two song lists, both there to stop one artist filling
-# the panel. "From your favourites" round-robins on the first, the gateway list
+# the panel. the favourites list round-robins on the first, the gateway list
 # shows at most the second under each recommended artist.
 TRACKS_PER_FAVORITE = 2
 GATEWAY_TRACKS = 3
 
 
-# how many of a user's top artists to ask Last.fm for similars, and how many
-# similars each. 10 x 10 = at most 100 names per user per pass, and after the
-# first run nearly all of them are already known.
+# how many top artists to ask for similars, and how many each. 10 x 10 is at
+# most 100 names per user per pass, and after the first run nearly all are known.
 SEED_ARTISTS = 10
 SIMILAR_PER_ARTIST = 10
 
 
 def get_top_artists(cur, user_id: int, limit: int = SEED_ARTISTS):
-    """A user's most-played artists, best first. Seeds the similar-artist
-    lookup. Grouped case-insensitively with a mode() display name, matching
+    """a user's most-played artists, best first. seeds the similar lookup.
+    grouped case-insensitively with a mode() display name, matching
     get_user_plays, so a mixed-casing artist is one seed and not two.
 
-    Blocked artists are skipped: "not interested" has to mean the pool stops
-    growing in that direction too, not just that one name disappears from the
-    list."""
+    blocked artists are skipped, because "not interested" has to stop the pool
+    growing in that direction, not just hide one name."""
     cur.execute(
         """
         SELECT mode() WITHIN GROUP (ORDER BY artist_name) AS artist_name
@@ -136,14 +133,15 @@ def get_top_artists(cur, user_id: int, limit: int = SEED_ARTISTS):
     return [row[0] for row in cur.fetchall()]
 
 
-# --- explicit feedback: the one place an opinion, not a play, steers the model -
+# explicit feedback: the one place an opinion, rather than a play, steers this.
 
 
 def set_feedback(cur, user_id: int, artist_name: str, verdict: str) -> None:
-    """Record "more like this" (seed) or "not interested" (block) for an artist.
-    Upsert on the case-insensitive key, so flipping a verdict replaces it rather
-    than leaving both. A re-seed clears expanded_at so the similar-artist lookup
-    runs for it again on the next pass."""
+    """record "more like this" (seed) or "not interested" (block).
+
+    upsert on the case-insensitive key, so flipping a verdict replaces it rather
+    than leaving both. a re-seed clears expanded_at so the similar lookup runs
+    again next pass."""
     cur.execute(
         """
         INSERT INTO artist_feedback (user_id, artist_name, verdict)
@@ -158,7 +156,7 @@ def set_feedback(cur, user_id: int, artist_name: str, verdict: str) -> None:
 
 
 def clear_feedback(cur, user_id: int, artist_name: str) -> None:
-    """Undo a seed or block. The artist goes back to being judged on plays alone."""
+    """undo a seed or block. the artist goes back to being judged on plays."""
     cur.execute(
         """
         DELETE FROM artist_feedback
@@ -169,7 +167,7 @@ def clear_feedback(cur, user_id: int, artist_name: str) -> None:
 
 
 def get_feedback(cur, user_id: int):
-    """Every artist this user has an opinion on, for the tuning list in the UI."""
+    """every artist this user has an opinion on, for the tuning list."""
     cur.execute(
         """
         SELECT artist_name, verdict FROM artist_feedback
@@ -181,7 +179,7 @@ def get_feedback(cur, user_id: int):
 
 
 def get_feedback_names(cur, user_id: int, verdict: str) -> list[str]:
-    """Just the names for one verdict. What the recommender pass needs."""
+    """just the names for one verdict, which is what the pass needs."""
     cur.execute(
         "SELECT artist_name FROM artist_feedback WHERE user_id = %s AND verdict = %s",
         (user_id, verdict),
@@ -190,8 +188,8 @@ def get_feedback_names(cur, user_id: int, verdict: str) -> list[str]:
 
 
 def get_pending_seeds(cur, user_id: int) -> list[str]:
-    """Seeds whose similar artists haven't been fetched yet. Bounds the cost of
-    seeding: each one costs a single Last.fm call, once."""
+    """seeds whose similars have not been fetched. bounds the cost: one call
+    per seed, once."""
     cur.execute(
         """
         SELECT artist_name FROM artist_feedback
@@ -203,7 +201,7 @@ def get_pending_seeds(cur, user_id: int) -> list[str]:
 
 
 def mark_seeds_expanded(cur, user_id: int) -> None:
-    """Stamp this user's seeds as looked up, so the next pass skips them."""
+    """stamp this user's seeds as looked up so the next pass skips them."""
     cur.execute(
         """
         UPDATE artist_feedback SET expanded_at = now()
@@ -214,9 +212,8 @@ def mark_seeds_expanded(cur, user_id: int) -> None:
 
 
 def drop_recommendation(cur, user_id: int, artist_name: str) -> None:
-    """Evict one artist from the cached list. Blocking already keeps it out of
-    the next rebuild; this is so "not interested" takes effect on the page now
-    instead of whenever the maintenance pass next runs."""
+    """evict one artist from the cached list. blocking already keeps it out of
+    the next rebuild; this is what makes the click take effect now."""
     cur.execute(
         """
         DELETE FROM recommendations
@@ -227,16 +224,15 @@ def drop_recommendation(cur, user_id: int, artist_name: str) -> None:
 
 
 def filter_unknown_artists(cur, names: list[str]) -> list[str]:
-    """Of `names`, the ones we have no tags for yet.
+    """of `names`, the ones with no tags yet.
 
-    Two filters in one pass, both case-insensitive: drop anything already in
-    artist_tags (we have it, or we asked and Last.fm had nothing), and drop
-    anything anyone has actually scrobbled (already in the corpus through the
-    normal path). What is left is genuinely new candidate material.
+    two case-insensitive filters in one pass: drop anything already in
+    artist_tags (we have it, or we asked and got nothing), and drop anything
+    anyone has scrobbled (already in the corpus the normal way). what is left is
+    genuinely new.
 
-    This is what keeps the API cost bounded: the first pass for a user fetches
-    up to ~100 artists, later passes fetch almost none, because the answer
-    shrinks to nothing as the corpus converges.
+    this is what bounds the api cost. a user's first pass fetches up to ~100
+    artists and later passes fetch almost none, as the corpus converges.
     """
     if not names:
         return []
@@ -256,9 +252,9 @@ def filter_unknown_artists(cur, names: list[str]) -> list[str]:
 
 
 def get_artists_missing_top_tracks(cur):
-    """Work list for the top-tracks backfill: artists we want songs for (every
-    user's favorites + every recommended artist) that aren't cached yet. Same
-    incremental NOT EXISTS shape as the duration/tag work lists."""
+    """work list for the top-tracks backfill: artists we want songs for (every
+    user's favorites plus every recommended artist) that are not cached yet.
+    same incremental NOT EXISTS shape as the other work lists."""
     cur.execute(
         """
         WITH wanted AS (
@@ -283,7 +279,7 @@ def get_artists_missing_top_tracks(cur):
 
 
 def insert_top_track(cur, artist_name: str, track_name: str, rank: int) -> None:
-    # ON CONFLICT DO NOTHING, so overlapping or re-run passes are idempotent
+    # overlapping or re-run passes stay idempotent
     cur.execute(
         """
         INSERT INTO artist_top_tracks (artist_name, track_name, rank)
@@ -295,17 +291,16 @@ def insert_top_track(cur, artist_name: str, track_name: str, rank: int) -> None:
 
 
 def get_song_recs_favorites(cur, user_id: int):
-    """Gap mining: popular tracks by the user's most-played artists that they
-    have never played. No taste-guessing: their own plays pick the artists,
-    Last.fm's global ranks pick the tracks.
+    """gap mining: popular tracks by the user's most-played artists that they
+    have never played. no taste-guessing, since their own plays pick the artists
+    and Last.fm's global ranks pick the tracks.
 
-    Capped at TRACKS_PER_FAVORITE per artist and ordered round-robin, so 25 slots
-    cover ~13 artists instead of walking the top artist's whole track list first.
-    Ordered by plays DESC it read as "here are two bands", which is not a
-    discovery list.
+    capped at TRACKS_PER_FAVORITE per artist and ordered round-robin, so 25
+    slots cover ~13 artists. ordered by plays DESC it read as "here are two
+    bands", which is not a discovery list.
 
-    NOTE: the anti-join matches exact track names, so a song scrobbled under a
-    variant title ("... (feat X)") can slip through as a rec; acceptable noise.
+    note: the anti-join matches exact track names, so a song scrobbled under a
+    variant title ("... (feat X)") can slip through. acceptable noise.
     """
     cur.execute(
         """
@@ -331,8 +326,8 @@ def get_song_recs_favorites(cur, user_id: int):
         SELECT artist_name, track_name, plays AS your_artist_plays
         FROM candidates
         WHERE per_artist <= %s
-        -- per_artist first = every artist's best track, then every artist's
-        -- second, rather than one artist exhausted before the next appears.
+        -- per_artist first: every artist's best track, then every artist's
+        -- second, rather than exhausting one artist before the next appears.
         ORDER BY per_artist, plays DESC
         LIMIT 25
         """,
@@ -342,14 +337,13 @@ def get_song_recs_favorites(cur, user_id: int):
 
 
 def get_song_recs_discovery(cur, user_id: int):
-    """Entry points into recommended artists: the top few tracks of each artist
-    the recommender picked, ordered by how well the artist matched. The user
-    hasn't played these artists at all, so no anti-join is needed.
+    """entry points into recommended artists: the top few tracks of each pick,
+    ordered by how well the artist matched. the user has played none of these,
+    so no anti-join is needed.
 
-    The frontend groups these under their artist, so EVERY recommended artist
-    needs rows or it renders with no "Start with" line. The limit is therefore
-    sized to the whole cached set (GATEWAY_TRACKS per artist, RECOMMEND_TOP_N
-    artists) rather than a flat 25, which used to run out at artist nine.
+    the frontend groups these under their artist, so every recommended artist
+    needs rows or it renders with no "start with" line. the limit is sized to
+    the whole cached set rather than a flat 25, which ran out at artist nine.
     """
     cur.execute(
         """

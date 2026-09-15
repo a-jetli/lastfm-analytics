@@ -1,9 +1,9 @@
-"""SQL-layer tests against a real Postgres (see conftest for how to run them).
+"""sql-layer tests against a real postgres. see conftest for how to run them.
 
-These cover the three things that have actually broken in this project: artist
-name casing, the UTC vs local day boundary, and counts that disagree with the
-rows they claim to count. Expected values are worked out by hand from
-conftest.CORPUS, never by running the query and pasting what it said.
+these cover the three things that have actually broken here: artist name casing,
+the utc vs local day boundary, and counts that disagree with the rows they claim
+to count. expected values are worked out by hand from conftest.CORPUS, never by
+running the query and pasting what it said.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -18,7 +18,7 @@ from tests.conftest import CORPUS_PLAYS, at
 
 @pytest.fixture
 def cur(conn):
-    """dict_row cursor: what routers/analytics.py hands the query layer."""
+    """dict_row cursor, what routers/analytics.py hands the query layer."""
     with conn.cursor(row_factory=dict_row) as c:
         yield c
 
@@ -27,7 +27,7 @@ def cur(conn):
 
 
 def test_streaks_finds_consecutive_runs(cur, alice):
-    # UTC play days are 0,1,2 then a gap at 3, then 5,6. So: a 3 day run and a
+    # utc play days are 0,1,2 then a gap at 3, then 5,6. so a 3 day run and a
     # 2 day run, longest first.
     rows = q.get_streaks(cur, alice, "UTC")
     assert [r["length_days"] for r in rows] == [3, 2]
@@ -36,13 +36,13 @@ def test_streaks_finds_consecutive_runs(cur, alice):
 
 
 def test_streaks_ignore_the_server_timezone(conn, cur, alice):
-    """The regression guard for the bug these tests originally caught.
+    """the regression guard for the bug these tests originally caught.
 
-    Every date bucket in this file used to be a bare `listened_at::date` or
-    date_trunc, both of which resolve in the SESSION timezone. So the answer
-    depended on where the server ran, and a 9pm Monday play plus a 9am Wednesday
-    play reported a 2-day streak that never happened. They go through
-    _LOCAL_DATE now, so the explicit tz argument is the only thing that decides.
+    every date bucket used to be a bare `listened_at::date` or date_trunc, both
+    of which resolve in the session timezone, so the answer depended on where the
+    server ran: a 9pm monday play plus a 9am wednesday play reported a 2-day
+    streak that never happened. they go through _LOCAL_DATE now, so the explicit
+    tz argument is the only thing that decides.
     """
     conn.execute("SET TIME ZONE 'Pacific/Kiritimati'")  # UTC+14
     try:
@@ -53,11 +53,11 @@ def test_streaks_ignore_the_server_timezone(conn, cur, alice):
 
 
 def test_streaks_follow_the_requested_timezone(cur, alice):
-    # Day 5's play is 03:30 UTC, so in New York it belongs to day 4. That turns
-    # the UTC [5,6] pair into [4] and [6], two separate single days.
+    # day 5's play is 03:30 utc, so in new york it belongs to day 4. that turns
+    # the utc [5,6] pair into [4] and [6], two separate single days.
     assert [r["length_days"] for r in q.get_streaks(cur, alice, "UTC")] == [3, 2]
-    # NY days are -1,0,1,2,4,6 (three plays cross backwards over midnight), so
-    # the runs become a 4 day one plus two isolated days.
+    # ny days are -1,0,1,2,4,6, since three plays cross backwards over midnight,
+    # so the runs become a 4 day one plus two isolated days.
     ny = q.get_streaks(cur, alice, "America/New_York")
     assert [r["length_days"] for r in ny] == [4, 1, 1]
 
@@ -66,7 +66,7 @@ def test_streaks_follow_the_requested_timezone(cur, alice):
 
 
 def test_discovery_folds_artist_casing(cur, alice):
-    # Three artists: Radiohead (both casings are ONE artist), boygenius, Nobody.
+    # three artists: Radiohead (both casings are one artist), boygenius, Nobody.
     rows = q.get_discovery(cur, alice, "UTC")
     assert sum(r["new_artists"] for r in rows) == 3
 
@@ -79,19 +79,19 @@ def test_loyalty_folds_casing_and_shows_the_common_spelling(cur, alice):
 
 
 def test_loyalty_excludes_artists_under_five_plays(cur, alice):
-    # HAVING COUNT(*) >= 5. "Nobody" has one play.
+    # HAVING COUNT(*) >= 5, and "Nobody" has one play
     assert "Nobody" not in {r["artist_name"] for r in q.get_loyalty(cur, alice, "UTC")}
 
 
 def test_loyalty_ranks_a_steady_favourite_above_a_one_day_binge(cur, alice):
-    """The metric fix. The denominator runs from an artist's first play to the
-    user's LAST play overall, so a burst you never returned to keeps decaying.
+    """the metric fix. the denominator runs from an artist's first play to the
+    user's last play overall, so a burst you never returned to keeps decaying.
 
     Radiohead: 5 active days, first play day 0, user's last play day 6
                -> 5 / 7 = 0.71
     boygenius: 5 plays all on day 1, so 1 active day
                -> 1 / 6 = 0.17
-    Against each artist's OWN span (the old denominator) boygenius scored 1.00
+    against each artist's own span, the old denominator, boygenius scored 1.00
     and came first, which is what made the number meaningless.
     """
     rows = q.get_loyalty(cur, alice, "UTC")
@@ -102,7 +102,7 @@ def test_loyalty_ranks_a_steady_favourite_above_a_one_day_binge(cur, alice):
 
 
 def test_loyalty_window_is_measured_to_the_users_last_play(cur, alice):
-    # days_since_first_play, not the artist's own span: boygenius only ever
+    # days_since_first_play, not the artist's own span. boygenius only ever
     # played on day 1, but the window still runs to the user's day 6.
     rows = {r["artist_name"]: r for r in q.get_loyalty(cur, alice, "UTC")}
     assert rows["Radiohead"]["days_since_first_play"] == 7  # day 0 through day 6
@@ -113,8 +113,8 @@ def test_loyalty_window_is_measured_to_the_users_last_play(cur, alice):
 
 
 def _one_play_at_a_month_boundary(conn) -> int:
-    """One play at 2025-08-01 01:00 UTC, which is 2025-07-31 21:00 in New York.
-    Tagged, so the genre-aware queries have something to join against."""
+    """one play at 2025-08-01 01:00 utc, which is 2025-07-31 21:00 in new york.
+    tagged, so the genre-aware queries have something to join against."""
     with conn.cursor() as c:
         user_id = qsync.create_user(c, "bob")
         qsync.insert_scrobble(
@@ -143,19 +143,19 @@ def _one_play_at_a_month_boundary(conn) -> int:
     ],
 )
 def test_month_buckets_follow_the_requested_timezone(conn, cur, call, key):
-    """date_trunc on a timestamptz resolves in the session timezone too, so a
-    9pm July 31st play in New York used to be counted in August. Every monthly
-    bucket goes through _LOCAL_MONTH / _LOCAL_PERIOD now."""
+    """date_trunc on a timestamptz also resolves in the session timezone, so a
+    9pm july 31st play in new york used to count in august. every monthly bucket
+    goes through _LOCAL_MONTH or _LOCAL_PERIOD now."""
     user_id = _one_play_at_a_month_boundary(conn)
     assert call(cur, user_id, "UTC")[0][key] == date(2025, 8, 1)
     assert call(cur, user_id, "America/New_York")[0][key] == date(2025, 7, 1)
 
 
 # --- the clock invariant -----------------------------------------------------
-# Every heatmap cell is clickable and drills into a date:/part: search. If the
+# every heatmap cell is clickable and drills into a date:/part: search. if the
 # clock's bucketing and the search filter's bucketing ever drift, a cell shows
-# one number and returns a different set of rows. They share _LOCAL_DATE and
-# _PART_OF_DAY to stop that, and these tests are what keeps it true.
+# one number and returns a different set of rows. they share _LOCAL_DATE and
+# _PART_OF_DAY to stop that, and these tests keep it true.
 
 
 @pytest.mark.parametrize("tz", ["UTC", "America/New_York", "Asia/Tokyo"])
@@ -169,8 +169,8 @@ def test_every_clock_cell_equals_the_rows_its_filter_returns(cur, alice, tz):
 
 
 def test_clock_buckets_by_local_day_not_utc_day(cur, alice):
-    # Day 5's play is 03:30 UTC, which is 23:30 on day 4 in New York. It must
-    # move one column left AND from night into evening.
+    # day 5's play is 03:30 utc, which is 23:30 on day 4 in new york. it must
+    # move one column left and from night into evening.
     day5, day4 = at(5, 0).date(), at(5, 0).date() - timedelta(days=1)
     utc = {(c["day"], c["part"]): c["plays"] for c in q.get_listening_clock(cur, alice, "UTC")}
     ny = {(c["day"], c["part"]): c["plays"] for c in q.get_listening_clock(cur, alice, "America/New_York")}
@@ -199,13 +199,13 @@ def test_clock_buckets_by_local_day_not_utc_day(cur, alice):
 )
 def test_scrobble_total_always_matches_the_page(cur, alice, search):
     # limit above the corpus size, so total and len(rows) must be equal for the
-    # shared WHERE clause to be doing its job.
+    # shared where clause to be doing its job.
     rows = q.get_scrobbles(cur, alice, search, limit=200, offset=0)
     assert q.count_scrobbles(cur, alice, search) == len(rows)
 
 
 def test_artist_search_is_case_insensitive(cur, alice):
-    # ILIKE, and both casings belong to the same artist.
+    # ilike, and both casings belong to the same artist
     assert q.count_scrobbles(cur, alice, "artist:RADIOHEAD") == 6
 
 
@@ -217,21 +217,21 @@ def test_offset_pages_without_repeating_rows(cur, alice):
 
 
 def test_unknown_sort_column_falls_back_instead_of_raising(cur, alice):
-    # sort is whitelisted, so a junk value must not reach the ORDER BY.
+    # sort is whitelisted, so a junk value must not reach the order by
     rows = q.get_scrobbles(cur, alice, None, limit=5, offset=0, sort="; DROP TABLE users")
     assert len(rows) == 5
 
 
 # --- regression guards for the three bugs found in the 2026-07-30 sweep -------
-# All three were invisible from the UI with one account, which is exactly the
+# all three were invisible from the ui with one account, which is exactly the
 # kind of thing tests are for.
 
 
 def test_comparing_a_user_with_themselves_scores_100(conn, cur, alice):
-    """Was 0% next to a full list of shared artists, because the row-splitting
-    loop put everything in one side and cosine against {} is 0. Typing your own
+    """was 0% next to a full list of shared artists, because the row-splitting
+    loop put everything on one side and cosine against {} is 0. typing your own
     handle into the compare box is the first thing anyone tries."""
-    # Compatibility is a genre-vector comparison, so it needs tagged artists.
+    # compatibility is a genre-vector comparison, so it needs tagged artists
     with conn.cursor() as c:
         qsync.insert_artist_tag(c, "Radiohead", "alternative rock", 100)
         qsync.insert_artist_tag(c, "boygenius", "indie rock", 100)
@@ -241,24 +241,24 @@ def test_comparing_a_user_with_themselves_scores_100(conn, cur, alice):
     assert with_self["shared_artist_count"] > 0
 
 
-# The recommender path runs on a plain tuple cursor in production
-# (_refresh_recommendations uses conn.cursor()), so these use one too rather
-# than the dict_row cursor the analytics layer needs.
+# the recommender path runs on a plain tuple cursor in production, since
+# _refresh_recommendations uses conn.cursor(), so these use one too rather than
+# the dict_row cursor the analytics layer needs.
 
 
 def test_recommendations_exclude_played_artists_across_casing(conn, alice):
-    """The exclusion set came from scrobbles and the candidate list from
-    artist_tags, each keyed on its own raw spelling. A user with 22 plays of
+    """the exclusion set came from scrobbles and the candidate list from
+    artist_tags, each keyed on its own raw spelling. a user with 22 plays of
     "Charli xcx" was recommended "Charli XCX"."""
     from app import recommender
     from app.queries import recommend as qrec
 
     with conn.cursor() as c:
-        # alice plays Radiohead/radiohead, boygenius and Nobody. Tag Radiohead
-        # under a THIRD casing so the corpus and the play list disagree.
-        # Two tags over four artists so idf is non-zero: with a single shared
-        # tag every vector is empty, nothing is recommended, and this test would
-        # pass no matter what the exclusion does.
+        # alice plays Radiohead/radiohead, boygenius and Nobody. tag Radiohead
+        # under a third casing so the corpus and the play list disagree.
+        # two tags over four artists so idf is non-zero: with a single shared tag
+        # every vector is empty, nothing is recommended, and this test would pass
+        # no matter what the exclusion does.
         qsync.insert_artist_tag(c, "RADIOHEAD", "shoegaze", 100)
         qsync.insert_artist_tag(c, "boygenius", "shoegaze", 100)
         qsync.insert_artist_tag(c, "Nobody", "jazz", 100)
@@ -279,8 +279,8 @@ def test_recommendations_exclude_played_artists_across_casing(conn, alice):
 
 
 def test_tag_corpus_gives_one_vector_per_artist(conn, alice):
-    """Two casings meant two vectors, so the same act could win two slots and
-    appear twice in one recommendation list."""
+    """two casings meant two vectors, so the same act could win two slots and
+    appear twice in one list."""
     from app.queries import recommend as qrec
 
     with conn.cursor() as c:
@@ -293,9 +293,9 @@ def test_tag_corpus_gives_one_vector_per_artist(conn, alice):
 
 
 # --- candidate pool widening --------------------------------------------------
-# Every artist in the corpus otherwise arrives through scrobbles, so candidates
-# ("tagged artists you have NOT played") are empty by construction at one user.
-# These cover the two DB-side halves; the Last.fm call itself is not tested.
+# every artist in the corpus otherwise arrives through scrobbles, so candidates
+# ("tagged artists you have not played") are empty by construction at one user.
+# these cover the two db-side halves. the Last.fm call itself is not tested.
 
 
 def test_top_artists_are_most_played_first_and_fold_casing(conn, alice):
@@ -303,14 +303,14 @@ def test_top_artists_are_most_played_first_and_fold_casing(conn, alice):
 
     with conn.cursor() as c:
         top = qrec.get_top_artists(c, alice, limit=10)
-    # Radiohead 6 plays (5 + 1 lowercase), boygenius 5, Nobody 1.
+    # Radiohead 6 plays (5 plus 1 lowercase), boygenius 5, Nobody 1.
     assert top[:2] == ["Radiohead", "boygenius"]
     assert "radiohead" not in top, "casing variant leaked in as a second seed"
 
 
 def test_filter_unknown_artists_drops_played_and_tagged(conn, alice):
-    """The bound on API cost. Anything already scrobbled, or already asked about,
-    must not come back, or every pass re-fetches the same artists forever."""
+    """the bound on api cost. anything already scrobbled, or already asked
+    about, must not come back, or every pass re-fetches the same artists."""
     from app.queries import recommend as qrec
 
     with conn.cursor() as c:
@@ -330,7 +330,7 @@ def test_filter_unknown_artists_handles_an_empty_batch(conn, alice):
 
 
 def test_a_tagged_unplayed_artist_becomes_recommendable(conn, alice):
-    """The whole point: an artist with tags but no scrobbles is a candidate,
+    """the whole point: an artist with tags but no scrobbles is a candidate,
     which is what the widening step creates."""
     from app import recommender
     from app.queries import recommend as qrec
@@ -358,14 +358,13 @@ def test_a_tagged_unplayed_artist_becomes_recommendable(conn, alice):
 
 
 def test_exclusion_view_stays_cheap(conn, cur, alice):
-    """The first version of this rule used a correlated NOT EXISTS that
-    re-scanned the `allowed` CTE once per row: 10ms became 1.3s on a 6k-row
+    """the first version of this rule used a correlated NOT EXISTS that
+    re-scanned the `allowed` cte once per row: 10ms became 1.3s on a 6k-row
     corpus, and every genre query reads this view.
 
-    Asserts the suppression is planned as an anti-join, i.e. the excluded set is
-    built once and hashed. Note this deliberately does NOT assert "no SubPlan
-    anywhere": the blocklist NOT IN is a hashed subplan, evaluated once, and has
-    always been there.
+    asserts the suppression is planned as an anti-join, so the excluded set is
+    built once and hashed. deliberately does not assert "no SubPlan anywhere":
+    the blocklist NOT IN is a hashed subplan, evaluated once, and always was.
     """
     with conn.cursor() as c:
         qsync.insert_artist_tag(c, "Arijit Singh", "bollywood", 100)
@@ -376,8 +375,8 @@ def test_exclusion_view_stays_cheap(conn, cur, alice):
 
 
 def test_context_tags_suppress_pop_and_hiphop(conn, cur, alice):
-    """"pop" on a Bollywood playback singer is crowd shorthand for "popular",
-    not the Western genre, and it swamped the real tag. The blocklist can't
+    """"pop" on a bollywood playback singer is crowd shorthand for "popular",
+    not the western genre, and it swamped the real tag. the blocklist cannot
     express this because these tags are only wrong in combination."""
     with conn.cursor() as c:
         qsync.insert_artist_tag(c, "Arijit Singh", "bollywood", 100)
@@ -410,14 +409,14 @@ def test_context_tags_suppress_pop_and_hiphop(conn, cur, alice):
     ],
 )
 def test_range_picker_narrows_and_never_widens(conn, cur, alice, call):
-    """A wider window can never return fewer rows than a narrower one. Cheap
-    invariant that catches a params list spliced in the wrong order, which is
-    the realistic way these three break."""
+    """a wider window can never return fewer rows than a narrower one. a cheap
+    invariant that catches a params list spliced in the wrong order, which is the
+    realistic way these break."""
     with conn.cursor() as c:
         qsync.insert_artist_tag(c, "Radiohead", "alternative rock", 100)
         qsync.insert_artist_tag(c, "boygenius", "indie rock", 100)
     conn.commit()
-    # Fixture plays span days 0-6 starting 10 days ago, so a 3 day window is
+    # fixture plays span days 0-6 starting 10 days ago, so a 3 day window is
     # empty, 30 days holds all of them, and all-time must match 30 days.
     counts = [len(call(cur, alice, d)) for d in (3, 30, None)]
     assert counts[0] == 0
@@ -425,10 +424,10 @@ def test_range_picker_narrows_and_never_widens(conn, cur, alice, call):
 
 
 # --- idempotency -------------------------------------------------------------
-# The sync high-water mark is the moment a sync STARTED, so every sync re-offers
+# the sync high-water mark is the moment a sync started, so every sync re-offers
 # rows it already inserted. ON CONFLICT DO NOTHING is the only thing making that
-# safe, and nothing verified it. Testing the query layer rather than
-# sync_service.join is deliberate: the guarantee lives in the SQL, and a test
+# safe, and nothing verified it. testing the query layer rather than
+# sync_service.join is deliberate: the guarantee lives in the sql, and a test
 # that reached Last.fm would be slow and rate-limited.
 
 
@@ -452,8 +451,8 @@ def test_reinserting_the_same_scrobble_changes_nothing(conn, alice):
 
 
 def test_a_genuine_replay_at_a_new_time_does_insert(conn, alice):
-    # Positive control: proves the test above is catching the conflict clause
-    # and not just a broken insert.
+    # positive control: proves the test above catches the conflict clause and
+    # not just a broken insert.
     with conn.cursor() as c:
         qsync.insert_scrobble(
             c,
@@ -476,7 +475,7 @@ def test_reinserting_enrichment_rows_changes_nothing(conn, alice):
     assert _count(conn, "track_durations") == 1
     assert _count(conn, "artist_tags") == 1
 
-    # A second pass must not overwrite either, so the first value stands.
+    # a second pass must not overwrite either, so the first value stands
     with conn.cursor() as c:
         qsync.insert_track_duration(c, "Radiohead", "Creep", 999)
         c.execute("SELECT duration_ms FROM track_durations")
@@ -484,8 +483,8 @@ def test_reinserting_enrichment_rows_changes_nothing(conn, alice):
 
 
 def test_backfill_work_lists_empty_out_as_they_are_filled(conn, alice):
-    """The incremental guarantee: a NOT EXISTS work list must shrink as rows
-    land, or the nightly pass re-fetches the same tracks from Last.fm forever."""
+    """the incremental guarantee: a NOT EXISTS work list must shrink as rows
+    land, or the pass re-fetches the same tracks forever."""
     with conn.cursor() as c:
         missing = qsync.get_tracks_missing_durations(c, alice)
         assert len(missing) == CORPUS_PLAYS  # every track is unknown at first

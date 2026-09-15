@@ -1,6 +1,6 @@
-# Pinned so a rebuild months from now installs the versions this was tested
-# against, and so CI can't go red from an upstream release with no commit
-# behind it. Bump deliberately, not by accident.
+# pinned so a rebuild months from now installs the versions this was tested
+# against, and so ci cannot go red from an upstream release with no commit behind
+# it. bump deliberately, not by accident.
 fastapi==0.136.3
 uvicorn[standard]==0.44.0
 requests==2.34.2

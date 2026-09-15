@@ -1,9 +1,9 @@
-"""SQL for the insight endpoints, the read side.
+"""sql for the insight endpoints, the read side.
 
-One function per feature: takes a cursor (+ params), runs one query, returns
-rows. No HTTP here; routers/analytics.py serves the rows as JSON. All genre
-work reads the artist_tags_clean view, so blocklist/alias/case rules live in
-one place (schema.sql) and never need a refetch to change.
+one function per feature: take a cursor and params, run one query, return rows.
+no http here; routers/analytics.py serves them as json. every genre query reads
+the artist_tags_clean view, so the blocklist, alias and case rules live in one
+place and never need a refetch to change.
 """
 
 import calendar
@@ -12,8 +12,8 @@ from datetime import date
 
 from app import recommender  # reuse the cosine function for taste compatibility
 
-# shared CTE: each artist's single strongest cleaned tag, their "primary genre".
-# every tag-based query below builds on it, so the definition lives in one place.
+# shared cte: each artist's strongest cleaned tag, their primary genre. every
+# tag query below builds on it, so the definition lives in one place.
 _PRIMARY_TAG_CTE = (
     "WITH primary_tag AS (SELECT DISTINCT ON (artist_name) artist_name, tag "
     "FROM artist_tags_clean ORDER BY artist_name, weight DESC, tag)"
@@ -21,8 +21,8 @@ _PRIMARY_TAG_CTE = (
 
 
 def get_user(cur, username: str):
-    """Returns {id, last_synced_at} for the user, or None if they don't exist.
-    The router needs last_synced_at to decide whether a refresh is due."""
+    """{id, last_synced_at} for the user, or None. the router needs
+    last_synced_at to decide whether a refresh is due."""
     cur.execute(
         "SELECT id, last_synced_at FROM users WHERE lastfm_username = %s", (username,)
     )
@@ -30,11 +30,11 @@ def get_user(cur, username: str):
 
 
 def get_streaks(cur, user_id: int, tz: str = "UTC"):
-    """Consecutive-day listening runs (gaps-and-islands).
+    """consecutive-day listening runs, the gaps-and-islands pattern.
 
-    Gaps-and-islands: day minus row-number is constant while days are
-    consecutive, so it groups a run. Days are the listener's, because on UTC days
-    a 9pm Monday play and a 9am Wednesday play report a streak that never was.
+    day minus row-number stays constant while days are consecutive, so it groups
+    a run. the days are the listener's, because on utc days a 9pm monday play
+    and a 9am wednesday play report a streak that never happened.
     """
     day = _LOCAL_DATE.format(col="listened_at")
     cur.execute(
@@ -62,12 +62,12 @@ def get_streaks(cur, user_id: int, tz: str = "UTC"):
 
 
 def get_discovery(cur, user_id: int, tz: str = "UTC"):
-    """New artists per month: count each artist in the month you first heard it.
-    Grouped case-insensitively (Last.fm scrobbles the same artist under mixed
-    casing, e.g. "Twenty One Pilots" vs "twenty one pilots"), so a lowercase
-    re-scrobble isn't mistaken for a brand-new artist. `tz` makes the months the
-    listener's, so a late-evening first play doesn't count as next month's
-    discovery."""
+    """new artists per month, counted in the month you first heard them.
+
+    grouped case-insensitively, because Last.fm scrobbles the same artist under
+    mixed casing ("Twenty One Pilots" vs "twenty one pilots") and a lowercase
+    re-scrobble must not look like a discovery. tz makes the months the
+    listener's, so a late-evening first play is not next month's discovery."""
     month = _LOCAL_MONTH.format(col="first_play")
     cur.execute(
         f"""
@@ -89,18 +89,18 @@ def get_discovery(cur, user_id: int, tz: str = "UTC"):
 
 
 def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
-    """active_days / days since you first heard them. Near 1.0 = still in
-    rotation; near 0 = played a lot once, then dropped. Labelled "Heavy rotation"
-    in the UI.
+    """active_days over days since you first heard them. near 1.0 is still in
+    rotation, near 0 is played a lot once then dropped. shown as "heavy
+    rotation" in the ui.
 
-    The denominator runs to the user's MOST RECENT play, not the artist's own
-    last play: against their own span every contiguous run scored a perfect 1.0,
-    so a one-afternoon binge outranked a year-long favourite. With `days` set the
-    whole metric, anchor included, is measured inside that window.
+    the denominator runs to the user's most recent play, not the artist's own
+    last play. against their own span every contiguous run scored a perfect 1.0,
+    so a one-afternoon binge outranked a year-long favourite. with `days` set,
+    the whole metric including the anchor is measured inside that window.
     """
     day = _LOCAL_DATE.format(col="listened_at")
     recent, recent_params = _recent(days)
-    # grouped case-insensitively, mode() picks the most common casing to show
+    # grouped case-insensitively, mode() picks the casing to show
     cur.execute(
         f"""
         WITH plays AS (
@@ -129,22 +129,22 @@ def get_loyalty(cur, user_id: int, tz: str = "UTC", days: int | None = None):
 
 
 # defined once: the clock groups by these and the scrobble filter matches on
-# them, so a cell's count always equals the rows a click returns.
-# parts are 6-hour blocks: 0=night, 1=morning, 2=afternoon, 3=evening.
+# them, so a cell's count always equals the rows a click returns. parts are
+# 6-hour blocks: 0 night, 1 morning, 2 afternoon, 3 evening.
 _PART_OF_DAY = "(EXTRACT(HOUR FROM {col} AT TIME ZONE %s)::int / 6)"
 _WEEKDAY = "EXTRACT(DOW FROM {col} AT TIME ZONE %s)::int"
-# bare listened_at::date and date_trunc both resolve in the session timezone, so
-# a 9pm play lands on tomorrow and a 9pm play on the 31st lands next month. every
-# date bucket in this file goes through one of these three.
+# a bare listened_at::date and date_trunc both resolve in the session timezone,
+# so a 9pm play lands on tomorrow and a 9pm play on the 31st lands next month.
+# every date bucket in this file goes through one of these three.
 _LOCAL_DATE = "({col} AT TIME ZONE %s)::date"  # 1 param: tz
 _LOCAL_MONTH = "date_trunc('month', {col} AT TIME ZONE %s)::date"  # 1 param: tz
 _LOCAL_PERIOD = "date_trunc(%s, {col} AT TIME ZONE %s)::date"  # 2 params: bucket, tz
 
 
 def _recent(days: int | None, col: str = "listened_at") -> tuple[str, list]:
-    """SQL fragment + params for the range picker, ("", []) when days is falsy so
-    callers can splice it in unconditionally. Rolling window from now(), not
-    calendar periods: "last 30 days" means 30 days, not "this month so far"."""
+    """sql fragment and params for the range picker, ("", []) when days is falsy
+    so callers can splice it in unconditionally. a rolling window from now(),
+    not calendar periods: "last 30 days" means 30 days, not this month so far."""
     if not days:
         return "", []
     return f" AND {col} >= now() - make_interval(days => %s)", [days]
@@ -153,10 +153,10 @@ PART_NAMES = ["night", "morning", "afternoon", "evening"]
 
 
 def get_listening_clock(cur, user_id: int, tz: str = "UTC", days: int | None = 365):
-    """Plays per (calendar day, part of day) over the last `days` days (None =
-    all time): one column per real date, like a contributions graph. A cell maps
-    to exactly one date and block, so it can be drilled into. Only non-empty
-    pairs come back; the caller fills the gaps."""
+    """plays per (calendar day, part of day) over the last `days` days, one
+    column per real date like a contributions graph. a cell maps to exactly one
+    date and block, so it can be drilled into. only non-empty pairs come back
+    and the caller fills the gaps."""
     day = _LOCAL_DATE.format(col="listened_at")
     part = _PART_OF_DAY.format(col="listened_at")
     recent, recent_params = _recent(days)
@@ -176,11 +176,12 @@ def get_listening_clock(cur, user_id: int, tz: str = "UTC", days: int | None = 3
 
 
 def get_genre_clock(cur, user_id: int, tz: str = "UTC", days: int | None = None):
-    """Genre heatmap: plays per (weekday, part, primary tag). weekday 0=Sunday,
-    part 0-3. Stays an AGGREGATE weekday grid unlike get_listening_clock, because
-    per-date tag cells would be too sparse to read. `days` is its range picker
-    (None = all time), which is what turns "what a typical week sounds like" into
-    a question you can ask of one season."""
+    """genre heatmap: plays per (weekday, part, primary tag). weekday 0 is
+    sunday, part is 0-3.
+
+    stays an aggregate weekday grid, unlike get_listening_clock, because per-date
+    tag cells would be too sparse to read. `days` is its range picker, which
+    turns "what a typical week sounds like" into a question about one season."""
     weekday = _WEEKDAY.format(col="s.listened_at")
     part = _PART_OF_DAY.format(col="s.listened_at")
     recent, recent_params = _recent(days, "s.listened_at")
@@ -202,13 +203,13 @@ def get_genre_clock(cur, user_id: int, tz: str = "UTC", days: int | None = None)
 
 
 def get_binges(cur, user_id: int, min_plays: int, days: int | None = None):
-    """Albums played heavily in a short burst.
+    """albums played heavily in a short burst.
 
-    Each play counts its album's plays in the trailing 7 days; the peak is the
-    burst size. Album-less plays are excluded.
+    each play counts its album's plays in the trailing 7 days, and the peak is
+    the burst size. album-less plays are excluded.
 
-    Two spans, easy to confuse: the 7-day RANGE is what "binge" means and is
-    fixed; `days` is the range picker and limits which plays are considered.
+    two spans, easy to confuse: the 7-day RANGE is what binge means and is fixed,
+    while `days` is the range picker and limits which plays count at all.
     """
     recent, recent_params = _recent(days)
     cur.execute(
@@ -237,13 +238,14 @@ def get_binges(cur, user_id: int, min_plays: int, days: int | None = None):
 
 def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC",
                   days: int | None = None):
-    """Tag mix over time: one row per (period, tag) with plays and
-    pct_of_period, raw and chart-ready. `period` is "month" (default) or
-    "week" (ISO, Monday start), bucketed in the listener's `tz`. `days` limits
-    it to a trailing window (None = all time) and is the Genres range picker,
-    which sums these rows client side. Each play maps to its artist's primary tag,
-    so a period's percentages sum to ~100 of the tagged plays. Untagged artists'
-    plays are just absent."""
+    """tag mix over time: one row per (period, tag) with plays and pct_of_period,
+    raw and chart-ready.
+
+    `period` is month or week (iso, monday start), bucketed in the listener's tz.
+    `days` limits it to a trailing window and backs the Genres range picker,
+    which sums these rows client side. each play maps to its artist's primary
+    tag, so a period's percentages sum to ~100 of the TAGGED plays. untagged
+    artists are simply absent."""
     # whitelist the bucket, then bind it as a param. never interpolate.
     bucket = "week" if period == "week" else "month"
     period_start = _LOCAL_PERIOD.format(col="s.listened_at")
@@ -274,11 +276,10 @@ def get_tag_shift(cur, user_id: int, period: str = "month", tz: str = "UTC",
 
 
 def get_listening_time(cur, user_id: int, period: str = "month", tz: str = "UTC"):
-    """Listening time per period, in hours, from the stored track durations.
-    `period` is "month" (default) or "week", bucketed in the listener's `tz`.
-    LEFT JOIN so a play whose track
-    hasn't been backfilled yet (or has no duration on Last.fm) still counts
-    toward `plays` but adds 0 to `hours`. Sum is in ms; /3.6e6 to get hours.
+    """listening time per period in hours, from the stored durations.
+
+    LEFT JOIN so a play whose track is not backfilled yet, or has no duration on
+    Last.fm, still counts toward plays but adds 0 hours. the sum is in ms.
     """
     bucket = "week" if period == "week" else "month"
     month = _LOCAL_PERIOD.format(col="s.listened_at")
@@ -301,11 +302,10 @@ def get_listening_time(cur, user_id: int, period: str = "month", tz: str = "UTC"
 
 
 def get_monthly_report(cur, user_id: int, period: str = "month", tz: str = "UTC"):
-    """Per-period totals, with play count vs. the previous period (LAG).
-    `period` is "month" (default) or "week", bucketed in the listener's `tz`.
-    Artists counted case-insensitively.
-    Output column stays named `month` (it's the period start) so callers don't
-    need to branch on the bucket."""
+    """per-period totals, with play count against the previous period (LAG).
+
+    artists are counted case-insensitively. the output column stays named
+    `month`, since it is the period start, so callers do not branch on bucket."""
     bucket = "week" if period == "week" else "month"
     month = _LOCAL_PERIOD.format(col="listened_at")
     cur.execute(
@@ -330,12 +330,12 @@ def get_monthly_report(cur, user_id: int, period: str = "month", tz: str = "UTC"
 
 
 def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
-    """One row per month: plays, new_artists (artists first heard that month),
-    hours (from stored durations), and top_genre (that month's most-played
-    primary tag). A month-over-month digest of the numbers you can't read off the
-    other charts at a glance. Months are the listener's via `tz`,
-    matching the rest of the monthly analytics. hours is 0 for a month whose tracks aren't
-    backfilled yet; top_genre is NULL until that month has a tagged artist."""
+    """one row per month: plays, new_artists, hours, and top_genre.
+
+    a month-over-month digest of the numbers the other charts do not show at a
+    glance. months are the listener's, like the rest of the monthly analytics.
+    hours is 0 for a month whose tracks are not backfilled yet, and top_genre is
+    null until that month has a tagged artist."""
     month = _LOCAL_MONTH.format(col="listened_at")
     month_s = _LOCAL_MONTH.format(col="s.listened_at")
     first_ever = _LOCAL_MONTH.format(col="first_ever")
@@ -345,7 +345,7 @@ def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
             SELECT {month} AS month, COUNT(*) AS plays
             FROM scrobbles WHERE user_id = %s GROUP BY month
         ),
-        new_per_month AS (  -- an artist counts in the month of its first-ever play
+        new_per_month AS (  -- an artist counts in the month of its first play
             SELECT {first_ever} AS month, COUNT(*) AS new_artists
             FROM (
                 SELECT lower(artist_name) AS akey, MIN(listened_at) AS first_ever
@@ -353,7 +353,7 @@ def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
             ) firsts
             GROUP BY month
         ),
-        hours_per_month AS (  -- LEFT JOIN durations: untracked plays add 0 hours
+        hours_per_month AS (  -- left join, so untracked plays add 0 hours
             SELECT {month_s} AS month,
                    ROUND(SUM(COALESCE(d.duration_ms, 0)) / 3600000.0, 1) AS hours
             FROM scrobbles s
@@ -361,8 +361,8 @@ def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
                    ON d.artist_name = s.artist_name AND d.track_name = s.track_name
             WHERE s.user_id = %s GROUP BY month
         ),
-        -- Split in two so the month expression appears ONCE: it needs a tz
-        -- parameter, and repeating it in SELECT, PARTITION BY and GROUP BY meant
+        -- split in two so the month expression appears once. it needs a tz
+        -- param, and repeating it in SELECT, PARTITION BY and GROUP BY meant
         -- three copies of the same bind param to keep in sync.
         genre_plays AS (
             SELECT {month_s} AS month, p.tag, COUNT(*) AS plays
@@ -390,23 +390,22 @@ def get_monthly_summary(cur, user_id: int, tz: str = "UTC"):
         LEFT JOIN genre_per_month g ON g.month = m.month
         ORDER BY m.month
         """,
-        # one (tz, user_id) pair per CTE, in the order they appear above
+        # one (tz, user_id) pair per cte, in the order they appear above
         (tz, user_id, tz, user_id, tz, user_id, tz, user_id),
     )
     return cur.fetchall()
 
 
 def get_artist_detail(cur, user_id: int, name: str) -> dict:
-    """Everything we can show about one artist when the user clicks it: their own
-    play count, the artist's cleaned genre tags, and the artist's top tracks.
-    All matched case-insensitively against `name`."""
+    """everything shown when the user clicks an artist: their own play count,
+    the cleaned genre tags, and the top tracks. all matched case-insensitively."""
     cur.execute(
         "SELECT COUNT(*) AS plays FROM scrobbles WHERE user_id = %s AND lower(artist_name) = lower(%s)",
         (user_id, name),
     )
     plays = cur.fetchone()["plays"]
-    # GROUP BY collapses mixed-casing artist rows - both variants carry tag/track
-    # rows - so tags and tracks aren't listed twice
+    # group by collapses mixed-casing rows, since both variants carry tag and
+    # track rows, so nothing is listed twice
     cur.execute(
         """
         SELECT tag, MAX(weight) AS weight FROM artist_tags_clean
@@ -431,37 +430,37 @@ def get_artist_detail(cur, user_id: int, name: str) -> dict:
 
 
 # columns the history table may sort by. whitelisted so `sort` can be safely
-# interpolated into ORDER BY, since a bound param can't name a column.
+# interpolated into ORDER BY, since a bound param cannot name a column.
 _SCROBBLE_SORT_COLS = {"listened_at", "artist_name", "track_name", "album_name"}
 
-# one search term: optional `field:` prefix, then either a "quoted value"
-# (artist names have spaces) or a bare run of non-space characters. not shlex on
-# purpose - shlex raises on an unbalanced apostrophe, and "Guns N' Roses" is a
+# one search term: an optional `field:` prefix, then a "quoted value" (artist
+# names have spaces) or a bare run of non-space characters. not shlex on
+# purpose: shlex raises on an unbalanced apostrophe, and "Guns N' Roses" is a
 # real artist someone will type.
 _TERM_RE = re.compile(r'(?:(\w+):)?(?:"([^"]*)"|(\S+))')
 
-# fields that filter one text column. values are column names, only ever looked
+# fields that filter one text column. the values are column names, only looked
 # up here and never taken from user input, so interpolating them is safe.
 _SEARCH_TEXT_FIELDS = {"artist": "artist_name", "track": "track_name",
                        "album": "album_name"}
 
-# month:january / month:jan / month:1 all mean the same thing. built from the
-# stdlib so the twelve names aren't hand-typed (index 0 is "" in both lists).
+# month:january, month:jan and month:1 all mean the same thing. built from the
+# stdlib so the twelve names are not hand-typed. index 0 is "" in both lists.
 _MONTH_NUMBERS = {name.lower(): n for n, name in enumerate(calendar.month_name) if name}
 _MONTH_NUMBERS.update({a.lower(): n for n, a in enumerate(calendar.month_abbr) if a})
 
-# day:friday / day:fri -> postgres DOW. calendar counts Monday=0, postgres
-# counts Sunday=0, hence the shift.
+# day:friday and day:fri map to postgres DOW. calendar counts monday as 0 and
+# postgres counts sunday as 0, hence the shift.
 _DAY_NUMBERS = {name.lower(): (n + 1) % 7 for n, name in enumerate(calendar.day_name)}
 _DAY_NUMBERS.update({a.lower(): (n + 1) % 7 for n, a in enumerate(calendar.day_abbr)})
 
-# part:night / part:morning / ... -> the same 0-3 buckets the clock draws
+# part:night, part:morning and so on map to the 0-3 buckets the clock draws
 _PART_NUMBERS = {name: n for n, name in enumerate(PART_NAMES)}
 
 def _is_iso_date(value: str) -> bool:
-    """date:2026-07-15, one calendar day. Fully validated here, not left to
-    Postgres: an impossible date like 2026-02-31 would raise on the cast and
-    turn a typo into a 500, where every other field just falls back to text."""
+    """date:2026-07-15, one calendar day. validated here rather than left to
+    postgres, where an impossible date like 2026-02-31 raises on the cast and
+    turns a typo into a 500. every other field falls back to text."""
     try:
         date.fromisoformat(value)
         return True
@@ -470,18 +469,18 @@ def _is_iso_date(value: str) -> bool:
 
 
 def parse_search(text: str | None) -> dict:
-    """Split the search box into structured filters, e.g.
+    """split the search box into structured filters, e.g.
 
         artist:Logic year:2026 month:january bohemian
 
     -> {"artist": ["Logic"], "years": [2026], "months": [1], "free": ["bohemian"]}
 
-    Fields: artist:, track:, album:, year:, month:, date: (ISO), day:, part:.
+    fields: artist:, track:, album:, year:, month:, date: (iso), day:, part:.
 
-    A term whose field is unknown (`foo:bar`), or whose value doesn't parse as a
-    year or month, falls through to free text rather than being dropped. Typing a
-    colon shouldn't silently delete part of the query. Free terms keep the
-    original behavior: match artist OR track, so searching a song title works.
+    a term whose field is unknown, or whose value does not parse as a year or
+    month, falls through to free text rather than being dropped, because typing
+    a colon should not silently delete part of the query. free terms match
+    artist or track, so searching a song title works.
     """
     found: dict = {"artist": [], "track": [], "album": [], "years": [], "months": [],
                    "dates": [], "days": [], "parts": [], "free": []}
@@ -505,17 +504,17 @@ def parse_search(text: str | None) -> dict:
         elif key == "part" and low in _PART_NUMBERS:
             found["parts"].append(_PART_NUMBERS[low])
         else:
-            # unknown field or unparseable value -> search the raw text as typed
+            # unknown field or unparseable value, so search the text as typed
             found["free"].append(f"{field}:{value}" if field else value)
     return found
 
 
 def _scrobble_filters(user_id: int, search: str | None, start, end,
                       tz: str = "UTC") -> tuple[list, list]:
-    """Shared WHERE clause for the history table as (conds, params).
+    """shared where clause for the history table, as (conds, params).
 
-    The page query and the count both call this, so "of 1,204" can never disagree
-    with the rows under it. `day:`/`part:` reuse the clock's own expressions for
+    the page query and the count both call this, so "of 1,204" can never disagree
+    with the rows under it. day: and part: reuse the clock's own expressions for
     the same reason.
     """
     conds = ["user_id = %s"]
@@ -524,12 +523,12 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
 
     for key, column in _SEARCH_TEXT_FIELDS.items():
         for value in f[key]:
-            # AND'd, so `artist:radiohead artist:thom` narrows rather than widens
+            # and-ed, so `artist:radiohead artist:thom` narrows rather than widens
             conds.append(f"{column} ILIKE %s")
             params.append(f"%{value}%")
 
     if f["years"]:
-        # one "within this year" range per requested year, OR'd together. a date
+        # one "within this year" range per requested year, or-ed together. a date
         # range rather than EXTRACT(YEAR ...) keeps the (user_id, listened_at)
         # index usable. several years widen the match.
         year_conds = []
@@ -539,13 +538,13 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
         conds.append("(" + " OR ".join(year_conds) + ")")
 
     if f["months"]:
-        # no index can help "every January", it's a scan by nature
+        # no index can help "every january", it is a scan by nature
         conds.append("EXTRACT(MONTH FROM listened_at) = ANY(%s)")
         params.append(f["months"])
 
     if f["dates"]:
-        # same local-date expression the heatmap groups by, so a clicked cell
-        # gives back exactly the plays it counted
+        # the same local-date expression the heatmap groups by, so a clicked
+        # cell gives back exactly the plays it counted
         conds.append(_LOCAL_DATE.format(col="listened_at") + " = ANY(%s::date[])")
         params += [tz, f["dates"]]
 
@@ -561,7 +560,7 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
         conds.append("(artist_name ILIKE %s OR track_name ILIKE %s)")
         params += [f"%{value}%", f"%{value}%"]
 
-    # the week drill-down's explicit range, AND'd on top of anything above
+    # the week drill-down's explicit range, applied on top of anything above
     if start:
         conds.append("listened_at >= %s")
         params.append(start)
@@ -574,10 +573,12 @@ def _scrobble_filters(user_id: int, search: str | None, start, end,
 def get_scrobbles(cur, user_id: int, search: str | None, limit: int, offset: int,
                   sort: str = "listened_at", direction: str = "desc",
                   start=None, end=None, tz: str = "UTC"):
-    """A page of a user's scrobbles. `search` takes field terms plus bare text
-    (see parse_search); `start`/`end` restrict to [start, end), which is how a
-    clicked week drills in. `sort`/`direction` order the WHOLE filtered history
-    so paging stays consistent, and both are whitelisted."""
+    """a page of a user's scrobbles.
+
+    `search` takes field terms plus bare text, see parse_search. `start`/`end`
+    restrict to [start, end), which is how a clicked week drills in. sort and
+    direction order the whole filtered history so paging stays consistent, and
+    both are whitelisted."""
     sort = sort if sort in _SCROBBLE_SORT_COLS else "listened_at"
     direction = "ASC" if str(direction).lower() == "asc" else "DESC"
     tiebreak = "" if sort == "listened_at" else ", listened_at DESC"
@@ -597,8 +598,8 @@ def get_scrobbles(cur, user_id: int, search: str | None, limit: int, offset: int
 
 def count_scrobbles(cur, user_id: int, search: str | None, start=None, end=None,
                     tz: str = "UTC") -> int:
-    """Total matching the same filters get_scrobbles pages through, so the table
-    can say "1-50 of 1,204" instead of inferring the end from a short page."""
+    """the total matching the same filters get_scrobbles pages through, so the
+    table can say "1-50 of 1,204" rather than infer the end from a short page."""
     conds, params = _scrobble_filters(user_id, search, start, end, tz)
     cur.execute(
         f"SELECT COUNT(*) AS total FROM scrobbles WHERE {' AND '.join(conds)}", params
@@ -607,9 +608,8 @@ def count_scrobbles(cur, user_id: int, search: str | None, start=None, end=None,
 
 
 def get_song_binges(cur, user_id: int, min_plays: int, days: int | None = None):
-    """Individual tracks played heavily in a short burst (the song-level twin of
-    get_binges). Same rolling-7-day-window peak, same `days` range picker; keep
-    tracks whose peak hits min_plays."""
+    """individual tracks played heavily in a short burst, the song-level twin of
+    get_binges. same rolling 7-day peak and same range picker."""
     recent, recent_params = _recent(days)
     cur.execute(
         f"""
@@ -637,9 +637,9 @@ def get_song_binges(cur, user_id: int, min_plays: int, days: int | None = None):
 
 
 def get_genre_tracks(cur, user_id: int, tag: str):
-    """The user's tracks whose artist's primary (strongest) genre is `tag`, most
-    played first. Powers the "show me this genre" drill-down. Reuses the same
-    primary-tag definition as the genre clock and tag shift."""
+    """the user's tracks whose artist's strongest genre is `tag`, most played
+    first. backs the genre drill-down, and reuses the same primary-tag definition
+    as the genre clock and tag shift."""
     cur.execute(
         _PRIMARY_TAG_CTE + """
         SELECT s.artist_name, s.track_name, COUNT(*) AS plays
@@ -656,15 +656,17 @@ def get_genre_tracks(cur, user_id: int, tag: str):
 
 
 def get_compatibility(cur, a_id: int, b_id: int) -> dict:
-    """Taste compatibility between two users. Pulls each user's genre play counts
-    with SQL, then does the comparison math in plain Python:
-      score          - 0-100 cosine similarity of their primary-tag play vectors
-      shared_artists - artists both play, with each user's counts (top 25)
-      shared_tags    - genres both listen to, with each user's % share
-      divergent_tags - genres where their shares differ most
+    """taste compatibility between two users.
+
+    pulls each user's genre play counts with sql, then does the comparison in
+    plain python:
+      score          0-100 cosine of their primary-tag play vectors
+      shared_artists artists both play, with each user's counts
+      shared_tags    genres both listen to, with each user's share
+      divergent_tags genres where their shares differ most
     """
-    # 1) each user's primary-tag play counts as a vector {tag: plays}. one query
-    #    covers both, split by user_id right after.
+    # each user's primary-tag play counts as {tag: plays}. one query covers
+    # both, split by user_id right after.
     cur.execute(
         _PRIMARY_TAG_CTE + """
         SELECT s.user_id, p.tag, COUNT(*) AS plays
@@ -683,16 +685,15 @@ def get_compatibility(cur, a_id: int, b_id: int) -> dict:
     if a_id == b_id:
         # comparing someone with themselves. the split above puts every row in
         # a_plays and leaves b_plays empty, scoring 0% next to a full list of
-        # shared artists - obvious nonsense, and typing your own handle into the
-        # compare box is the first thing anyone does.
+        # shared artists. typing your own handle is the first thing anyone does.
         b_plays = dict(a_plays)
 
-    # 2) score = cosine similarity of the two vectors, reusing the recommender's
-    #    function, shown as 0-100.
+    # score is the cosine of the two vectors, reusing the recommender's
+    # function, shown as 0-100.
     score = round(100 * recommender.cosine(a_plays, b_plays), 1)
 
-    # 3) genre shares: each tag as a percent of that user's tagged plays. "or 1"
-    #    dodges divide-by-zero for someone with no tagged plays, who gets 0%.
+    # genre shares: each tag as a percent of that user's tagged plays. "or 1"
+    # dodges divide-by-zero for someone with no tagged plays, who gets 0%.
     total_a = sum(a_plays.values()) or 1
     total_b = sum(b_plays.values()) or 1
     tag_rows = []
@@ -707,9 +708,9 @@ def get_compatibility(cur, a_id: int, b_id: int) -> dict:
     )[:15]
     divergent_tags = sorted(tag_rows, key=lambda r: r["gap"], reverse=True)[:10]
 
-    # 4) shared artists, with both users' counts. wrapped in a subquery so
-    # a_plays/b_plays are real columns to filter and sort on - postgres won't take
-    # SELECT aliases in an ORDER BY expression.
+    # shared artists with both users' counts. wrapped in a subquery so a_plays
+    # and b_plays are real columns to filter and sort on, since postgres will not
+    # take select aliases in an order by expression.
     cur.execute(
         """
         SELECT artist_name, a_plays, b_plays FROM (

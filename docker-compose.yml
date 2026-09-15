@@ -1,5 +1,5 @@
-# Full stack from a clean clone: docker compose up
-# Needs a .env next to this file with LASTFM_API_KEY=<key> (compose reads it).
+# full stack from a clean clone: docker compose up
+# needs a .env next to this file with LASTFM_API_KEY=<key>, which compose reads.
 services:
   db:
     image: postgres:18
@@ -7,12 +7,12 @@ services:
       POSTGRES_DB: lastfm
       POSTGRES_PASSWORD: postgres
     volumes:
-      # Named volume so the data survives container recreation. Postgres 18's
+      # named volume, so the data survives container recreation. the postgres 18
       # image keeps its data under /var/lib/postgresql.
       - pgdata:/var/lib/postgresql
-      # The official image runs this against the fresh DB on FIRST boot only.
+      # the official image runs this against the fresh db on first boot only
       - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
-    # -h 127.0.0.1 forces TCP on purpose: during first boot the entrypoint runs
+    # -h 127.0.0.1 forces tcp on purpose. during first boot the entrypoint runs
     # schema.sql against a socket-only temp server, so a socket check reports
     # ready while the schema is still loading.
     healthcheck:
@@ -20,31 +20,31 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
-    # Survive a reboot; a deliberate `compose stop` still stays stopped.
+    # survive a reboot. a deliberate `compose stop` still stays stopped.
     restart: unless-stopped
 
   app:
     build: .
     ports:
-      # Loopback only. Public traffic arrives through a Cloudflare tunnel:
+      # loopback only. public traffic arrives through a cloudflare tunnel:
       # cloudflared runs on the host as a systemd service and connects to
-      # localhost:8000, so nothing needs to reach this port from outside. Binding
-      # to 127.0.0.1 means the app stays unreachable even if a security group
-      # rule is wrong. Change back to "8000:8000" to serve directly again.
+      # localhost:8000, so nothing needs to reach this port from outside. it also
+      # means the app stays unreachable if a security group rule is wrong.
+      # change back to "8000:8000" to serve directly again.
       - "127.0.0.1:8000:8000"
     environment:
-      # "db" is the service name above; containers on the compose network
-      # reach each other by service name, never "localhost".
+      # "db" is the service name above. containers on the compose network reach
+      # each other by service name, never "localhost".
       DATABASE_URL: postgresql://postgres:postgres@db:5432/lastfm
       LASTFM_API_KEY: ${LASTFM_API_KEY}
-    # "db ready", not "db started": not to avoid a crash loop (connections are
-    # per request) but so a first request can't land mid-initdb.
+    # db ready, not db started. not to avoid a crash loop, since connections are
+    # per request, but so a first request cannot land mid-initdb.
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      # Liveness only: /health never touches Postgres, so a DB blip can't make
-      # a fine app look dead.
+      # liveness only. /health never touches postgres, so a db blip cannot make
+      # a healthy app look dead.
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
       interval: 15s
       timeout: 5s
