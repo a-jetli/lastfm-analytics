@@ -196,8 +196,8 @@
   .gm-cell[data-lvl="0"] { cursor: default; color: var(--muted); }
   .gm-cell[data-lvl="0"]:hover { outline: 0; }
   /* 52px, not 40: "afternoon" has to fit on one line or it breaks mid-word */
-  @media (max-width: 620px) { .gm-cell { font-size: 10px; min-height: 40px; }
-    .gm { grid-template-columns: 52px repeat(7, minmax(0, 1fr)); } .gm .lbl { font-size: 10px; } }
+  @media (max-width: 620px) { .gm-cell { font-size: 11px; min-height: 40px; }
+    .gm { grid-template-columns: 52px repeat(7, minmax(0, 1fr)); } .gm .lbl { font-size: 11px; } }
   .hm-cell[data-lvl="0"] { cursor: default; }
   .hm-cell[data-lvl="0"]:hover { outline: 0; }
   /* own tooltip, because native title= sits there for ~1s first */
@@ -385,7 +385,7 @@
 <main>
   <header class="mast">
     <div class="mast-top">
-      <div class="logo">Rotation</div>
+      <h1 class="logo">Rotation</h1>
       <div class="mast-r">
         <form class="search" id="form">
           <input id="user" placeholder="Last.fm username" required>
