@@ -36,7 +36,7 @@
   /* masthead */
   header.mast { padding: 24px 0 0; }
   .mast-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .logo { font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -.4px; }
+  .logo { color: var(--accent); font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -.4px; }
   .mast-r { display: flex; align-items: center; gap: 10px; }
   form.search { display: flex; gap: 8px; align-items: center; }
   input { padding: 9px 13px; border: 1px solid var(--line); border-radius: 8px;
@@ -77,15 +77,56 @@
   .viewing a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
   .rule { height: 1px; background: var(--line); margin: 16px 0 0; }
 
-  /* landing */
-  #landing { padding: 68px 0 40px; max-width: 640px; }
-  #landing h2 { font-family: var(--display); font-weight: 500; font-size: clamp(30px, 5vw, 46px);
-                line-height: 1.1; letter-spacing: -.5px; }
-  #landing h2 span { color: var(--accent); }
-  #landing p { color: var(--ink-2); margin-top: 18px; font-size: 16px; }
-  #landing a { color: var(--accent); text-decoration: none; font-weight: 600; border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+  /* Home uses the same header and search controls as the dashboard. */
+  main:has(#landing:not([hidden])) { max-width: 1180px; }
+  main:has(#landing:not([hidden])) .mast-top { justify-content: flex-end; }
+  main:has(#landing:not([hidden])) .logo { font-size: clamp(64px, 9vw, 112px); line-height: 1;
+    letter-spacing: -1.5px; margin-bottom: 32px; }
+  main:has(#landing:not([hidden])) .mast-r { width: auto; }
+  main:has(#landing:not([hidden])) .rule { display: none; }
+  main:has(#landing:not([hidden])) footer { margin-top: 64px; font-size: 14px; }
+  main:has(#landing:not([hidden])) :is(a, button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  #landing:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: center; gap: clamp(40px, 7vw, 100px); padding-top: 36px; }
+  #landing p { color: var(--ink); font: 400 16px/1.55 var(--sans); }
+  .landing-copy p + p { margin-top: 18px; }
+  #landing .landing-note { color: var(--muted); font-size: 15px; line-height: 1.7; }
+  #landing a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   #landing a:hover { border-bottom-color: var(--accent); }
-  #landing .hint { color: var(--muted); font-size: 14px; margin-top: 26px; }
+  .landing-listen { min-width: 0; }
+  .record-scene { position: relative; display: grid; place-items: center; aspect-ratio: 1.2;
+    margin-bottom: 30px; }
+  .record { --sheen-strong: 22%; --sheen-soft: 12%;
+    width: 82%; aspect-ratio: 1; border-radius: 50%; position: relative;
+    background: repeating-radial-gradient(circle, transparent 0 5px, color-mix(in srgb, var(--accent) 12%, transparent) 5px 6px),
+      radial-gradient(circle, color-mix(in srgb, var(--accent) 6%, var(--bg)) 0 64%, transparent 71%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent); }
+  :root[data-theme="dark"] .record { --sheen-strong: 18%; --sheen-soft: 10%; }
+  .record::before { content: ""; position: absolute; inset: 0; border-radius: inherit;
+    background: conic-gradient(from 30deg, transparent, color-mix(in srgb, var(--accent) var(--sheen-strong), transparent) 15%,
+      transparent 28% 50%, color-mix(in srgb, var(--accent) var(--sheen-soft), transparent) 65%, transparent 78%);
+    animation: record-turn 24s linear infinite; }
+  .record::after { content: ""; position: absolute; inset: 35%; border-radius: 50%;
+    background: radial-gradient(circle, var(--bg) 0 5%, var(--accent) 6% 8%, transparent 9%),
+      conic-gradient(from 45deg, color-mix(in srgb, var(--accent) 65%, var(--bg)), var(--accent),
+        color-mix(in srgb, var(--accent) 65%, var(--bg)));
+    box-shadow: 0 0 0 8px var(--bg), 0 0 0 9px color-mix(in srgb, var(--accent) 20%, transparent); }
+  @keyframes record-turn { to { transform: rotate(360deg); } }
+  #landing-controls form.search { width: 100%; gap: 8px; }
+  #landing-controls input { width: 0; min-width: 0; flex: 1; padding: 14px 16px; }
+  #landing-controls button { padding: 14px 22px; }
+  #landing-controls #status:not(:empty) { margin-top: 12px; }
+  #landing .hint { color: var(--muted); font-size: 14px; margin-top: 16px; line-height: 1.65; }
+  @media (prefers-reduced-motion: reduce) {
+    .record::before { animation: none; }
+  }
+  @media (max-width: 760px) {
+    #landing:not([hidden]) { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-top: 28px; }
+    main:has(#landing:not([hidden])) .logo { margin-bottom: 24px; }
+    .record-scene { height: 160px; aspect-ratio: auto; margin-bottom: 20px; overflow: hidden; }
+    .record { width: 160px; }
+    main:has(#landing:not([hidden])) footer { margin-top: 36px; }
+  }
 
   /* scroll containers that slide sideways on a narrow screen, never scrolled by
      the bar itself. macos with a mouse attached reserves layout space for a
@@ -191,6 +232,7 @@
   .gm-cell[data-lvl="1"] { background: color-mix(in srgb, var(--accent-2) 28%, transparent); }
   .gm-cell[data-lvl="2"] { background: color-mix(in srgb, var(--accent-2) 52%, transparent); }
   .gm-cell[data-lvl="3"] { background: color-mix(in srgb, var(--accent-2) 76%, transparent); }
+  :root[data-theme="dark"] .gm-cell[data-lvl="3"] { color: var(--on-accent); }
   .gm-cell[data-lvl="4"] { background: var(--accent-2); color: var(--on-accent); }
   .gm-cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
   .gm-cell[data-lvl="0"] { cursor: default; color: var(--muted); }
@@ -273,6 +315,13 @@
   .tracklist .t .by { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
 
   .cols2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 34px; }
+  .rec-controls { padding-bottom: 18px; }
+  @media (min-width: 721px) {
+    .cols2.recommendations { row-gap: 0; }
+    .recommendations > .block { display: grid; grid-template-rows: subgrid; grid-row: span 4; }
+    .recommendations > .block > .head { grid-row: 2; }
+    .recommendations .reclist { grid-row: 3; align-self: start; }
+  }
   @media (max-width: 720px) { .cols2 { grid-template-columns: minmax(0, 1fr); } }
 
   /* tables (fixed layout so sorting can't reflow widths) */
@@ -388,7 +437,7 @@
       <h1 class="logo">Rotation</h1>
       <div class="mast-r">
         <form class="search" id="form">
-          <input id="user" placeholder="Last.fm username" required>
+          <input id="user" placeholder="Last.fm username" aria-label="Last.fm username" required>
           <button>Load</button>
         </form>
         <span id="status" role="status" aria-live="polite"></span>
@@ -400,11 +449,19 @@
   </header>
 
   <section id="landing">
-    <h2>I wanted access to more history and analytics from my music streaming platforms. I built <span>Rotation</span> to solve that problem.</h2>
-    <p>To start, log in or sign up at <a href="https://www.last.fm/join" target="_blank" rel="noopener">last.fm</a> and connect to whatever services you stream on. Everything you play after that gets tracked, letting you explore your full history, streaks, genres, trends, binges, taste shifts, and more.</p>
-    <p>This app works through Last.fm to consolidate all your streams across a single usable API. Sign up, connect your accounts, and the app does the rest.</p>
-    <p>Note that data collection only starts once you sign up and connect your accounts, so anything you played before that is invisible to the application.</p>
-    <p class="hint">Enter your Last.fm username above to begin.</p>
+    <div class="landing-copy">
+      <p class="landing-intro">I wanted access to more history and analytics from the music I listened to. I built Rotation to solve that problem.</p>
+      <p>To start, log in or sign up at <a href="https://www.last.fm/join" target="_blank" rel="noopener">last.fm</a> and connect to whatever services you stream on. Everything you play after that gets tracked, letting you explore your full history, streaks, genres, trends, binges, taste shifts, and more.</p>
+      <p>This app works through Last.fm to consolidate all your streams across a single usable API. Sign up, connect your accounts, and the app does the rest.</p>
+      <p class="landing-note">Note that data collection only starts once you sign up and connect your accounts, so anything you played before that is invisible to the application.</p>
+    </div>
+    <div class="landing-listen">
+      <div class="record-scene">
+        <div class="record" aria-hidden="true"></div>
+      </div>
+      <div id="landing-controls"></div>
+      <p class="hint">Enter your Last.fm username above to view your analytics. If this is your first time using Rotation, it may take a few minutes to sync all your Last.fm streams.</p>
+    </div>
   </section>
 
   <div id="app" hidden>
@@ -485,17 +542,19 @@
     </section>
 
     <section class="panel" data-panel="foryou" hidden>
-      <div class="cols2">
+      <div class="cols2 recommendations">
         <section class="block">
+          <div class="rec-controls">
+            <form class="search seedform" id="seed-form">
+              <input id="seed-input" list="seed-list" autocomplete="off"
+                     placeholder="add an artist you want more like">
+              <datalist id="seed-list"></datalist>
+              <button>Add</button>
+            </form>
+            <div class="note" style="margin-top:8px">Type any artist, or pick one you've played from the suggestions.</div>
+          </div>
           <div class="head"><h3>Artists to explore</h3></div>
-          <form class="search seedform" id="seed-form">
-            <input id="seed-input" list="seed-list" autocomplete="off"
-                   placeholder="add an artist you want more like">
-            <datalist id="seed-list"></datalist>
-            <button>Add</button>
-          </form>
-          <div class="note" style="margin-top:8px">Type any artist, or pick one you've played from the suggestions.</div>
-          <div class="reclist" id="recs" style="margin-top:18px"></div>
+          <div class="reclist" id="recs"></div>
           <div class="note">Rate one and the next rebuild takes it into account. "More like this" also sends us looking for artists similar to it.</div>
         </section>
         <section class="block">
@@ -612,6 +671,10 @@ function applyTheme(t) { document.documentElement.setAttribute('data-theme', t);
 $('theme-toggle').addEventListener('click', () =>
   applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
 applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
+
+// Share the logo and controls between the landing layout and dashboard header.
+document.querySelector('.landing-copy').prepend(document.querySelector('.logo'));
+$('landing-controls').append($('form'), $('status'));
 
 let currentUser = null;
 // `label` is what the filter bar says for a start/end range, set when the drill
@@ -842,6 +905,8 @@ $('form').addEventListener('submit', async e => {
     $('scrob-search').value = ''; updateScrobFilter(); loadScrobbles();
     $('compat').innerHTML = ''; $('other').value = '';
     $('seed-input').value = ''; loadSeedOptions(user);
+    document.querySelector('.mast-top').prepend(document.querySelector('.logo'));
+    document.querySelector('.mast-r').prepend($('form'), $('status'));
     $('landing').hidden = true; $('app').hidden = false; switchTab('overview');
     $('viewing').hidden = false;
     $('viewing').innerHTML = `viewing <a href="${lfmUser(user)}" target="_blank" rel="noopener">${esc(user)} ↗</a> on Last.fm`;
