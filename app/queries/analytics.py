@@ -11,6 +11,7 @@ import re
 from datetime import date
 
 from app import recommender  # reuse the cosine function for taste compatibility
+from app.queries.sync import get_user
 
 # shared cte: each artist's strongest cleaned tag, their primary genre. every
 # tag query below builds on it, so the definition lives in one place.
@@ -18,15 +19,6 @@ _PRIMARY_TAG_CTE = (
     "WITH primary_tag AS (SELECT DISTINCT ON (artist_name) artist_name, tag "
     "FROM artist_tags_clean ORDER BY artist_name, weight DESC, tag)"
 )
-
-
-def get_user(cur, username: str):
-    """{id, last_synced_at} for the user, or None. the router needs
-    last_synced_at to decide whether a refresh is due."""
-    cur.execute(
-        "SELECT id, last_synced_at FROM users WHERE lastfm_username = %s", (username,)
-    )
-    return cur.fetchone()
 
 
 def get_streaks(cur, user_id: int, tz: str = "UTC"):

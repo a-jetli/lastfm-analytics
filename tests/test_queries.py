@@ -437,6 +437,18 @@ def _count(conn, table: str) -> int:
         return c.fetchone()[0]
 
 
+def test_usernames_are_normalized_before_storage_and_lookup(conn):
+    with conn.cursor() as cur:
+        user_id = qsync.create_user(cur, " I-Sleep ")
+        cur.execute("SELECT lastfm_username FROM users WHERE id = %s", (user_id,))
+        assert cur.fetchone()[0] == "i-sleep"
+        assert qsync.get_user(cur, " I-SLEEP ")[0] == user_id
+        assert qsync.create_user(cur, "i-sleep") == user_id
+    with conn.cursor(row_factory=dict_row) as cur:
+        assert q.get_user(cur, "I-sleep")["id"] == user_id
+    assert _count(conn, "users") == 1
+
+
 def test_reinserting_the_same_scrobble_changes_nothing(conn, alice):
     replay = {
         "artist": "Radiohead",

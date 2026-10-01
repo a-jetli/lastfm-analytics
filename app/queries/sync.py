@@ -1,14 +1,19 @@
 def get_user(cur, username: str):
     """(user_id, last_synced_at) for an existing user, or None if new."""
     cur.execute(
-        "SELECT id, last_synced_at FROM users WHERE lastfm_username = %s", (username,)
+        "SELECT id, last_synced_at FROM users WHERE lastfm_username = %s",
+        (username.strip().lower(),),
     )
     return cur.fetchone()
 
 
 def create_user(cur, username: str) -> int:
+    username = username.strip().lower()
     cur.execute(
-        "INSERT INTO users (lastfm_username) VALUES (%s) RETURNING id",
+        """INSERT INTO users (lastfm_username) VALUES (%s)
+           ON CONFLICT (lastfm_username) DO UPDATE
+           SET lastfm_username = EXCLUDED.lastfm_username
+           RETURNING id""",
         (username,),
     )
     return cur.fetchone()[0]

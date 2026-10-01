@@ -181,5 +181,9 @@ play, because a play at 03:30 UTC belongs to the previous day in New York, and a
 Roughly 14% of tracks come back from Last.fm with no duration, so listening
 hours is a slight undercount.
 
+Usernames are trimmed and lowercased before database lookups and inserts, so
+different casing uses the same user. Existing mixed-case records need a separate
+merge; normalizing input does not change stored records.
+
 
 Powered by AudioScrobbler. Artist, album and track names link back to Last.fm.

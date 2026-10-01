@@ -52,6 +52,24 @@ def test_known_user_returns_200(client, endpoint):
     assert client.get(f"/analytics/alice/{endpoint}").status_code == 200
 
 
+def test_username_casing_uses_the_same_history_and_sync(client, monkeypatch):
+    from app import lastfm
+
+    def unexpected_fetch(*args, **kwargs):
+        pytest.fail("An existing username must not be validated as a new user")
+
+    monkeypatch.setattr(lastfm, "getrecents", unexpected_fetch)
+    assert client.get("/analytics/ALICE/scrobbles").json() == client.get(
+        "/analytics/alice/scrobbles"
+    ).json()
+    response = client.post("/sync/ALICE")
+    assert response.status_code == 200
+    assert response.json()["status"] == "refreshing"
+    status = client.get("/sync/AlIcE/status")
+    assert status.status_code == 200
+    assert status.json()["scrobbles"] == 12
+
+
 @pytest.mark.parametrize("endpoint", ENDPOINTS)
 def test_unknown_user_is_404_not_500(client, endpoint):
     r = client.get(f"/analytics/definitely-not-a-user/{endpoint}")

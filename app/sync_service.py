@@ -113,6 +113,7 @@ def join(username: str, force: bool = False, wait: bool = True) -> tuple[int, bo
     leaves no phantom user. a transient outage during that check is swallowed
     rather than blocking the join on a blip.
     """
+    username = username.strip().lower()
     with db.get_connection() as conn, conn.cursor() as cur:
         row = sync_queries.get_user(cur, username)
     if row:
